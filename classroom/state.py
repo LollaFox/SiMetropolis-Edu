@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from hashlib import sha256
 import secrets
-from threading import Lock
+from threading import Event, Lock
 from time import monotonic
 from typing import Optional
 
@@ -76,6 +76,7 @@ class ClassSession:
     groups: dict = field(default_factory=dict)
     swapped: bool = False
     comparisons: dict = field(default_factory=dict)
+    swap_or_end: Event = field(default_factory=Event, init=False, repr=False, compare=False)
 
     def occupied_sites(self):
         return {group.site for group in self.groups.values()}
@@ -101,6 +102,7 @@ class ClassSession:
         first.move_to_partner_site(second.site)
         second.move_to_partner_site(first_site)
         self.swapped = True
+        self.swap_or_end.set()
         return True
 
 
@@ -131,6 +133,7 @@ class Classroom:
         session = self.classes.get(code)
         if session is not None and session.expires_at <= monotonic():
             del self.classes[code]
+            session.swap_or_end.set()
             return None
         return session
 
@@ -158,4 +161,5 @@ class Classroom:
         if session.teacher != teacher:
             return False
         del self.classes[code]
+        session.swap_or_end.set()
         return True

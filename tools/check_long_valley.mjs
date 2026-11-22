@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
@@ -258,16 +260,16 @@ test('an expired Traditional Chinese class closes for joined groups and rejects 
   await group.getByRole('heading', { name: 'This class is closed' }).waitFor();
 });
 
-async function startInvestigation(t, language = 'English') {
-  const { browser, issueCredential, origin } = await classroom(t);
+async function startInvestigation(t, language = 'English', ...options) {
+  const { browser, issueCredential, origin } = await classroom(t, ...options);
   const teacher = await participant(browser);
   await openClass(teacher, origin, issueCredential(), language);
   const projector = await openProjection(teacher);
   const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
 
-  async function groupAt(site) {
+  async function groupAt(site, url = joinUrl) {
     const group = await participant(browser);
-    await group.goto(joinUrl);
+    await group.goto(url);
     await group.getByRole('button', { name: new RegExp(`^(?:Choose Site|選擇場地) ${site}$`) }).click();
     await group.getByRole('heading', { name: new RegExp(`^(?:Site|場地) ${site}[:：]`) }).waitFor();
     return group;
@@ -388,6 +390,7 @@ test('the spring baseline hides the works while keeping the site, habitat, and p
 
   await group.getByRole('button', { name: 'Without proposed works' }).click();
   await group.getByText('Spring baseline', { exact: true }).waitFor();
+  assert.ok(await group.evaluate(() => window.scrollY > 0), 'The form should open at the comparison');
   await key.getByText('Modelled nesting habitat', { exact: true }).waitFor();
   await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
   assert.equal(await key.getByText('Tunnel entrances', { exact: true }).count(), 0);
@@ -652,6 +655,374 @@ test('reopening the gallery and selected comparison of a closed Traditional Chin
   }
 });
 
+const swapNotification = '**/join/*/status?wait=swap';
+
+async function delayClassroomRequest(t, origin, shouldHold) {
+  let arrived, release;
+  const reached = new Promise(resolve => { arrived = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  // Delay at the server so Chromium can still run the document awaiting navigation.
+  const proxy = createServer(async (incoming, outgoing) => {
+    const { pathname, search } = new URL(incoming.url, origin);
+    const target = new URL(origin);
+    target.pathname = pathname;
+    target.search = search;
+    if (shouldHold(incoming.method, target)) {
+      arrived(target);
+      await gate;
+    }
+    if (outgoing.destroyed) return;
+    const headers = { ...incoming.headers, host: target.host };
+    if (headers.origin === proxyOrigin) headers.origin = origin;
+    const forwarded = request(target, { method: incoming.method, headers }, response => {
+      outgoing.writeHead(response.statusCode, response.headers);
+      response.pipe(outgoing);
+    });
+    forwarded.on('error', () => outgoing.destroy());
+    outgoing.on('close', () => forwarded.destroy());
+    incoming.pipe(forwarded);
+  });
+  proxy.listen(0, '127.0.0.1');
+  await once(proxy, 'listening');
+  const proxyOrigin = `http://127.0.0.1:${proxy.address().port}`;
+  t.after(() => {
+    release();
+    proxy.close();
+    proxy.closeAllConnections();
+  });
+  const url = address => new URL(address.replace(origin, proxyOrigin)).href;
+  return { url, reached, release };
+}
+
+async function holdRequest(page, url) {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route(url, async route => {
+    await gate;
+    await route.continue();
+  }, { times: 1 });
+  return release;
+}
+
+async function watchOpeningNotice(page) {
+  // Report from the original document while the replacement response is still held.
+  const prefix = 'Opening notice state ';
+  await page.evaluate(prefix => {
+    const notice = document.querySelector('[data-site-check]');
+    const observer = new MutationObserver(() => {
+      if (notice.hidden || notice.textContent !== notice.dataset.siteOpening) return;
+      observer.disconnect();
+      requestAnimationFrame(() => requestAnimationFrame(report));
+    });
+    function report() {
+      const site = document.querySelector('[data-group-site]');
+      const isVisible = element => element.getClientRects().length > 0;
+      console.debug(prefix + JSON.stringify({
+        site: site.dataset.groupSite,
+        text: document.body.innerText,
+        map: isVisible(site.querySelector('.site-map')),
+        controls: Array.from(site.querySelectorAll('button, select, a')).some(isVisible),
+        focusInSite: site.contains(document.activeElement),
+      }));
+    }
+    observer.observe(notice, { attributes: true, childList: true });
+  }, prefix);
+  return () => page.waitForEvent('console', event => event.text().startsWith(prefix))
+    .then(event => JSON.parse(event.text().slice(prefix.length)));
+}
+
+test('the outstanding swap notification hides the old map while the partner site loads', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher, joinUrl, origin } = await startInvestigation(t);
+  const assignment = `${new URL(joinUrl).pathname}/status?wait=swap`;
+  assert.equal((await teacher.request.get(new URL(assignment, joinUrl).href, { timeout: 3000 })).status(), 403);
+  const navigation = await delayClassroomRequest(t, origin, (method, url) =>
+    method === 'GET' && url.pathname === new URL(joinUrl).pathname && url.searchParams.get('notice') === 'swapped');
+  const groupA = await groupAt('A', navigation.url(joinUrl));
+  const groupB = await groupAt('B');
+  await groupB.getByLabel('Railway alignment').selectOption('north');
+  await groupB.getByRole('button', { name: 'Test crossing' }).click();
+  await groupA.getByRole('button', { name: '繁體中文' }).click();
+  await groupA.getByLabel('鐵路形式').selectOption('tunnel');
+
+  // Only the first watch can deliver the swap. A later polling cycle cannot satisfy this test.
+  let watches = 0;
+  await groupA.route(swapNotification, route => {
+    if (++watches === 1) return route.continue();
+  });
+  await Promise.all([
+    groupA.waitForRequest(swapNotification),
+    groupA.getByRole('button', { name: '儲存走線以交換場地' }).click(),
+  ]);
+  await groupA.getByLabel('鐵路形式').focus();
+
+  const openingNotice = await watchOpeningNotice(groupA);
+  try {
+    const [state, destination] = await Promise.all([
+      openingNotice(),
+      navigation.reached,
+      teacher.getByRole('button', { name: 'Pass the City' }).click(),
+    ]);
+    assert.equal(state.site, 'A', 'The original document should still be on screen');
+    assert.doesNotMatch(state.text, /場地 A：中央濕地/);
+    assert.match(state.text, /正在開啟對方的場地⋯/);
+    assert.equal(state.map, false);
+    assert.equal(state.controls, false);
+    assert.equal(state.focusInSite, false);
+    assert.equal(destination.searchParams.get('lang'), 'zh-Hant');
+    await groupB.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+    assert.equal(await groupB.getByLabel('Railway alignment').inputValue(), 'north');
+  } finally {
+    navigation.release();
+  }
+  await groupA.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
+  assert.equal(await groupA.getByLabel('鐵路形式').inputValue(), 'tunnel');
+  assert.ok(await groupA.locator('.site-map').isVisible());
+  const current = await groupA.request.get(new URL(assignment, joinUrl).href, { timeout: 3000 });
+  assert.equal(current.status(), 204);
+  assert.equal(current.headers()['x-current-site'], 'B');
+});
+
+test('an offline group hides its map, preserves an unchanged draft, and catches up to a swap', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher } = await startInvestigation(t);
+  const group = await groupAt('A');
+  await groupAt('B');
+  const checking = group.getByText('Checking your current site…', { exact: true });
+  const original = group.getByRole('heading', { name: 'Site A: Central wetland' });
+  const alignment = group.getByLabel('Railway alignment');
+  const assignment = '**/join/*/status';
+  await alignment.selectOption('north');
+
+  await group.context().setOffline(true);
+  await checking.waitFor();
+  const releaseUnchanged = await holdRequest(group, assignment);
+  try {
+    await Promise.all([group.waitForRequest(assignment), group.context().setOffline(false)]);
+    await checking.waitFor();
+    assert.ok(!(await group.locator('.site-map').isVisible()));
+    assert.ok(!(await alignment.isVisible()));
+  } finally {
+    releaseUnchanged();
+  }
+  await original.waitFor();
+  assert.equal(await alignment.inputValue(), 'north');
+
+  await group.context().setOffline(true);
+  await checking.waitFor();
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  const releaseSwapped = await holdRequest(group, assignment);
+  try {
+    await Promise.all([group.waitForRequest(assignment), group.context().setOffline(false)]);
+    await checking.waitFor();
+    assert.ok(!(await original.isVisible()));
+    assert.ok(!(await group.locator('.site-map').isVisible()));
+  } finally {
+    releaseSwapped();
+  }
+  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  assert.equal(await alignment.inputValue(), 'central');
+});
+
+test('reconnecting after class ends shows the group’s chosen closing language', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher } = await startInvestigation(t);
+  const group = await groupAt('A');
+  await groupAt('B');
+  await group.getByRole('button', { name: '繁體中文' }).click();
+  await group.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+  await group.context().setOffline(true);
+  const checking = group.getByText('正在確認你們的場地⋯', { exact: true });
+  await checking.waitFor();
+  await teacher.getByRole('button', { name: 'End class' }).click();
+
+  const assignment = '**/join/*/status';
+  const releaseCheck = await holdRequest(group, assignment);
+  try {
+    await Promise.all([group.waitForRequest(assignment), group.context().setOffline(false)]);
+    await checking.waitFor();
+    assert.ok(!(await group.locator('.site-map').isVisible()));
+  } finally {
+    releaseCheck();
+  }
+  await group.getByRole('heading', { name: '這個課堂已結束' }).waitFor();
+  assert.equal(await group.locator('html').getAttribute('lang'), 'zh-Hant');
+});
+
+test('returning to a starting site with browser Back keeps the map hidden until revalidation', { timeout: 30000 }, async (t) => {
+  const { groupAt, origin } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const alignment = group.getByLabel('Railway alignment');
+  await alignment.selectOption('north');
+  await group.goto(origin);
+  const assignment = '**/join/*/status';
+  const releaseCheck = await holdRequest(group, assignment);
+  try {
+    await Promise.all([group.waitForRequest(assignment), group.goBack({ waitUntil: 'domcontentloaded' })]);
+    await group.getByText('Checking your current site…', { exact: true }).waitFor();
+    assert.ok(!(await group.locator('.site-map').isVisible()));
+    assert.ok(!(await alignment.isVisible()));
+  } finally {
+    releaseCheck();
+  }
+  await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  assert.equal(await alignment.inputValue(), 'north');
+});
+
+test('browser Back after a swap restores the carried crossing in the map and controls', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher, origin, joinUrl } = await startInvestigation(t);
+  const saved = await groupAt('A');
+  const tested = await groupAt('B');
+  const railway = page => page.locator('.site-map .map-railway')
+    .evaluateAll(lines => lines.map(line => line.getAttribute('points')));
+  await saved.getByRole('button', { name: '繁體中文' }).click();
+  await saved.getByRole('button', { name: '儲存走線以交換場地' }).click();
+  await saved.getByRole('list', { name: '圖例' }).getByText('橋墩', { exact: true }).waitFor();
+  const savedRailway = await railway(saved);
+  await saved.getByLabel('鐵路走線').selectOption('north');
+  await saved.getByLabel('鐵路形式').selectOption('tunnel');
+  await tested.getByLabel('Railway alignment').selectOption('north');
+  await tested.getByLabel('Crossing type').selectOption('tunnel');
+  await tested.getByRole('button', { name: 'Test crossing' }).click();
+  await tested.getByRole('list', { name: 'Map key' }).getByText('Tunnel entrances', { exact: true }).waitFor();
+  const testedRailway = await railway(tested);
+  await tested.getByLabel('Railway alignment').selectOption('south');
+  await tested.getByLabel('Crossing type').selectOption('elevated');
+  const joinPath = new URL(joinUrl).pathname;
+  await saved.route(url => url.pathname === joinPath, route => route.continue());
+  await Promise.all([saved.goto(origin), tested.goto(origin)]);
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+
+  for (const [group, heading, alignment, crossing, mapKey, work, testButton, carriedRailway] of [
+    [saved, '場地 B：河畔濕地', 'central', 'elevated', '圖例', '橋墩', '測試走線', savedRailway],
+    [tested, 'Site A: Central wetland', 'north', 'tunnel', 'Map key', 'Tunnel entrances', 'Test crossing', testedRailway],
+  ]) {
+    const assertCrossing = async page => {
+      await page.getByRole('heading', { name: heading }).waitFor();
+      await page.getByRole('list', { name: mapKey }).getByText(work, { exact: true }).waitFor();
+      assert.equal(await page.getByLabel(/Railway alignment|鐵路走線/).inputValue(), alignment);
+      assert.equal(await page.getByLabel(/Crossing type|鐵路形式/).inputValue(), crossing);
+      assert.deepEqual(await railway(page), carriedRailway);
+    };
+    await group.goBack({ waitUntil: 'commit' });
+    await assertCrossing(group);
+    await group.getByRole('button', { name: testButton }).click();
+    const reopened = await group.context().newPage();
+    await reopened.goto(joinUrl);
+    await assertCrossing(reopened);
+  }
+});
+
+test('browser Back while offline restores the same-site draft on reconnect', { timeout: 30000 }, async (t) => {
+  const { groupAt, origin, joinUrl } = await startInvestigation(t);
+  const group = await groupAt('A');
+  await groupAt('B');
+  const alignment = group.getByLabel('Railway alignment');
+  const crossing = group.getByLabel('Crossing type');
+  await alignment.selectOption('north');
+  await crossing.selectOption('tunnel');
+  const otherTab = await group.context().newPage();
+  await otherTab.goto(joinUrl);
+  await otherTab.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  assert.equal(await otherTab.getByLabel('Railway alignment').inputValue(), 'central');
+
+  await group.goto(origin);
+  await group.context().setOffline(true);
+  try {
+    await group.goBack({ waitUntil: 'commit' });
+    assert.ok(!(await alignment.isVisible()));
+  } catch (error) {
+    assert.match(error.message, /ERR_INTERNET_DISCONNECTED/);
+  } finally {
+    await group.context().setOffline(false);
+  }
+
+  await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  assert.equal(await alignment.inputValue(), 'north');
+  assert.equal(await crossing.inputValue(), 'tunnel');
+});
+
+test('a slow assignment response finishes revalidation and reveals the crossing controls', { timeout: 30000 }, async (t) => {
+  const { groupAt, joinUrl } = await startInvestigation(t, '繁體中文');
+  const group = await groupAt('A');
+  await groupAt('B');
+  const alignment = group.getByLabel('鐵路走線');
+  await alignment.selectOption('north');
+  await group.context().setOffline(true);
+  const checking = group.getByText('正在確認你們的場地⋯', { exact: true });
+  await checking.waitFor();
+
+  const assignment = '**/join/*/status';
+  await group.route(assignment, async route => {
+    const response = await route.fetch();
+    await delay(5500);
+    await route.fulfill({ response }).catch(() => {});
+  });
+  await Promise.all([group.waitForRequest(assignment), group.context().setOffline(false)]);
+  assert.ok(await checking.isVisible());
+  assert.ok(!(await group.locator('.site-map').isVisible()));
+  assert.ok(!(await alignment.isVisible()));
+  await group.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor({ timeout: 12000 });
+  assert.equal(await alignment.inputValue(), 'north');
+  await group.getByRole('button', { name: '測試走線' }).click();
+  const reopened = await group.context().newPage();
+  await reopened.goto(joinUrl);
+  await reopened.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+  assert.equal(await reopened.getByLabel('鐵路走線').inputValue(), 'north');
+});
+
+test('an interrupted status script download recovers the partner site on reconnect', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const partner = await groupAt('B');
+  await group.getByLabel('Crossing type').selectOption('tunnel');
+  await group.getByRole('button', { name: 'Save for swap' }).click();
+  await group.getByRole('status').getByText('Crossing saved for Pass the City.').waitFor();
+
+  let interrupted;
+  const disconnected = new Promise(resolve => { interrupted = resolve; });
+  await group.route('**/class-status.js', async route => {
+    await group.context().setOffline(true);
+    await route.abort('internetdisconnected');
+    interrupted();
+  }, { times: 1 });
+  await group.reload({ waitUntil: 'commit' });
+  await disconnected;
+  await group.getByText('Checking your current site…', { exact: true }).waitFor();
+  assert.ok(!(await group.locator('.site-map').isVisible()));
+  assert.ok(!(await group.getByLabel('Crossing type').isVisible()));
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  await partner.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+
+  await group.context().setOffline(false);
+  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  assert.equal(await group.getByLabel('Crossing type').inputValue(), 'tunnel');
+  await group.getByRole('list', { name: 'Map key' }).getByText('Tunnel entrances', { exact: true }).waitFor();
+});
+
+for (const [startingLanguage, chosenLanguage, chosenTag, closeHeading, operation] of [
+  ['English', '繁體中文', 'zh-Hant', '這個課堂已結束', 'ends'],
+  ['繁體中文', 'English', 'en', 'This class is closed', 'expires'],
+]) {
+  test(`browser Back after class ${operation} opens a fresh closing page in ${chosenLanguage}`, { timeout: 30000 }, async (t) => {
+    const options = operation === 'expires' ? ['--duration-seconds', '6'] : [];
+    const { groupAt, teacher, origin, joinUrl } = await startInvestigation(t, startingLanguage, ...options);
+    const group = await groupAt('A');
+    const partner = await groupAt('B');
+    await group.getByRole('button', { name: chosenLanguage }).click();
+    await group.getByRole('heading', { name: /^(?:Site|場地) A[:：]/ }).waitFor();
+    assert.equal(await group.locator('html').getAttribute('lang'), chosenTag);
+
+    // Route the history request to bypass Chromium's HTTP cache.
+    await group.route(`${new URL(joinUrl).origin}${new URL(joinUrl).pathname}*`, route => route.continue());
+    await group.goto(origin);
+    if (operation === 'ends') await teacher.getByRole('button', { name: 'End class' }).click();
+    await partner.getByRole('heading', { name: /This class is closed|這個課堂已結束/ }).waitFor({ timeout: 9000 });
+
+    const response = await group.goBack({ waitUntil: 'domcontentloaded' });
+    assert.equal(response?.status(), 410);
+    await group.getByRole('heading', { name: closeHeading }).waitFor();
+    assert.equal(await group.locator('html').getAttribute('lang'), chosenTag);
+  });
+}
+
 test('Pass the City applies each saved crossing at the partner site', { timeout: 30000 }, async (t) => {
   const { groupAt, joinUrl, teacher } = await startInvestigation(t);
   const groupA = await groupAt('A');
@@ -761,7 +1132,7 @@ test('a language switch during the swap keeps the saved crossing and both partne
   const groupB = await groupAt('B');
 
   // Delay the swap notification so the group submits the form it still sees at Site A.
-  await groupA.route('**/classes/*/status', route => route.abort());
+  await groupA.route(swapNotification, () => {});
   await groupA.getByLabel('Crossing type').selectOption('tunnel');
   await groupA.getByRole('button', { name: 'Save for swap' }).click();
   await groupA.getByText('Crossing saved for Pass the City.', { exact: true }).waitFor();
@@ -770,7 +1141,7 @@ test('a language switch during the swap keeps the saved crossing and both partne
   await groupA.getByRole('button', { name: '繁體中文' }).click();
   await groupA.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
   assert.equal(await groupA.getByLabel('鐵路形式').inputValue(), 'tunnel');
-  await groupA.unroute('**/classes/*/status');
+  await groupA.unroute(swapNotification);
   await groupB.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
 
   await teacher.getByRole('button', { name: 'End class' }).click();
@@ -834,27 +1205,58 @@ test('Pass the City keeps the original Site A comparison on the projector while 
 });
 
 test('a pre-swap tab can share Site A without restoring its outdated draft at Site B', { timeout: 30000 }, async (t) => {
-  const { groupAt, teacher, projector } = await startInvestigation(t);
+  const { groupAt, teacher, projector, origin } = await startInvestigation(t);
   const group = await groupAt('A');
-  await groupAt('B');
+  const partner = await groupAt('B');
+  await partner.getByRole('button', { name: 'Share comparison' }).click();
+  await projector.getByRole('link', { name: 'Shared comparisons' }).click();
+  await projector.getByRole('link', { name: /Site B: Riverside wetland/ }).click();
+  const selectedBeforeSwap = projector.url();
   await group.getByRole('button', { name: 'Save for swap' }).click();
   await group.getByLabel('Crossing type').selectOption('tunnel');
   await group.getByLabel('Construction access route', { exact: true }).selectOption('valley');
   await group.getByRole('button', { name: 'Test crossing' }).click();
 
+  const share = await delayClassroomRequest(t, origin, (method, url) =>
+    method === 'POST' && url.pathname.endsWith('/share'));
   const stale = await group.context().newPage();
-  await stale.route('**/classes/*/status', route => route.abort());
-  await stale.goto(group.url());
+  const releaseNotification = await holdRequest(stale, swapNotification);
+  await stale.goto(share.url(group.url()));
   await stale.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
   await stale.getByLabel('Railway alignment').selectOption('north');
-  await teacher.getByRole('button', { name: 'Pass the City' }).click();
-  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
-  assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
-  await group.getByLabel('Railway alignment').selectOption('south');
-  await group.getByRole('button', { name: 'Without proposed works' }).click();
+  const openingNotice = await watchOpeningNotice(stale);
+  try {
+    await Promise.all([
+      share.reached,
+      stale.getByRole('button', { name: 'Share comparison' }).click({ noWaitAfter: true }),
+    ]);
+    await teacher.getByRole('button', { name: 'Pass the City' }).click();
+    await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+    assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
+    await group.getByLabel('Railway alignment').selectOption('south');
+    await group.getByRole('button', { name: 'Without proposed works' }).click();
 
-  await stale.getByRole('button', { name: 'Share comparison' }).click();
-  await projectSiteAComparison(projector);
+    const notice = openingNotice();
+    const notification = stale.waitForResponse(swapNotification);
+    releaseNotification();
+    const [state, response] = await Promise.all([notice, notification]);
+    assert.equal(response.headers()['x-current-site'], 'B');
+    assert.match(state.text, /Opening your partner site…/);
+    assert.equal(state.controls, false);
+  } finally {
+    releaseNotification();
+    share.release();
+  }
+
+  await stale.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  await stale.getByRole('status').getByText('Comparison shared with your teacher.').waitFor();
+  assert.equal(await stale.getByLabel('Railway alignment').inputValue(), 'south');
+  assert.equal(await stale.getByRole('button', { name: 'Without proposed works' }).getAttribute('aria-pressed'), 'true');
+  assert.equal(projector.url(), selectedBeforeSwap);
+  await projector.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  await projector.getByRole('link', { name: 'Back to shared comparisons' }).click();
+  await projector.getByRole('link', { name: /Site A: Central wetland/ }).click();
+  const selected = projector.url();
   await projector.getByText('Central crossing · Tunnel · Valley approach', { exact: true }).waitFor();
   await projector.getByRole('region', { name: 'With proposed works' })
     .getByText('Construction access route overlaps modelled nesting habitat.', { exact: true }).waitFor();
@@ -863,4 +1265,34 @@ test('a pre-swap tab can share Site A without restoring its outdated draft at Si
   assert.equal(await group.getByLabel('Railway alignment').inputValue(), 'south');
   assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
   assert.equal(await group.getByRole('button', { name: 'Without proposed works' }).getAttribute('aria-pressed'), 'true');
+
+  await partner.getByRole('button', { name: 'Share comparison' }).click();
+  await partner.getByRole('status').getByText('Comparison shared with your teacher.').waitFor();
+  assert.equal(projector.url(), selected);
+  await projector.getByText('Central crossing · Tunnel · Valley approach', { exact: true }).waitFor();
+});
+
+test('a group that stops Share comparison still moves to its partner site', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher, joinUrl, origin } = await startInvestigation(t);
+  const share = await delayClassroomRequest(t, origin, (method, url) =>
+    method === 'POST' && url.pathname.endsWith('/share'));
+  const group = await groupAt('A', share.url(joinUrl));
+  const partner = await groupAt('B');
+  await group.getByLabel('Crossing type').selectOption('tunnel');
+  await group.getByRole('button', { name: 'Save for swap' }).click();
+  await group.getByRole('status').getByText('Crossing saved for Pass the City.').waitFor();
+  const browserSession = await group.context().newCDPSession(group);
+  try {
+    await Promise.all([
+      share.reached,
+      group.getByRole('button', { name: 'Share comparison' }).click({ noWaitAfter: true }),
+    ]);
+    await browserSession.send('Page.stopLoading');
+    await teacher.getByRole('button', { name: 'Pass the City' }).click();
+    await partner.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+    await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+    assert.equal(await group.getByLabel('Crossing type').inputValue(), 'tunnel');
+  } finally {
+    share.release();
+  }
 });
