@@ -23,6 +23,12 @@ COPY = {
     "open": ("Your class is open", "課堂已開啟"),
     "project": ("Project join information", "投影加入資訊"),
     "project_help": ("Open the join information in this browser and show that tab on the projector.", "請在此瀏覽器開啟加入資訊，並將該分頁投影給小組。"),
+    "pass_the_city": ("Pass the City", "交換場地"),
+    "pass_help": ("Ask both groups to save a crossing, then send them to their partner sites.",
+                  "請兩組各自儲存走線，然後讓兩組交換場地。"),
+    "pass_waiting": ("Both groups need to join before you can swap sites.", "兩組都加入課堂後，便可交換場地。"),
+    "pass_done": ("Both groups have moved to their partner sites.", "兩組已到達對方的場地。"),
+    "partner_site": ("You’re at your partner site. Try your crossing here.", "你們已到達對方的場地。試試你們的走線吧。"),
     "end": ("End class", "結束課堂"),
     "sign_out": ("Sign out", "登出"),
     "join_title": ("Join the Long Valley class", "加入塱原課堂"),
@@ -50,9 +56,11 @@ COPY = {
 }
 
 
-def page(language, title, content, *, layout="", session=None):
+def page(language, title, content, *, layout="", session=None, watch_swap=False):
     name = words(language, COPY)["name"]
     status = f' data-class-status="/classes/{session.code}/status"' if session else ""
+    if watch_swap:
+        status += f' data-sites-swapped="{str(session.swapped).lower()}"'
     script = '<script src="/class-status.js" defer></script>' if session else ""
     return f"""<!doctype html>
 <html lang="{language}">
@@ -112,7 +120,7 @@ def sign_in(language, invalid=False):
 </section>""")
 
 
-def teacher(language, session=None):
+def teacher(language, session=None, *, notice=""):
     t = words(language, COPY)
     sign_out = f"""<form class="inline" action="/teacher/sign-out?lang={language}" method="post">
   <button class="secondary">{t["sign_out"]}</button>
@@ -123,6 +131,7 @@ def teacher(language, session=None):
   <h1>{t["open"]}</h1>
   <p>{t["project_help"]}</p>
   <a class="button" href="/teacher/project/{session.code}" target="_blank" rel="noopener">{t["project"]}</a>
+  {pass_the_city_controls(session, t, notice)}
   <div class="teacher-actions">
     <form class="inline" action="/teacher/end?lang={language}" method="post">
       <button class="end" name="code" value="{session.code}">{t["end"]}</button>
@@ -145,6 +154,17 @@ def teacher(language, session=None):
   </form>
   <div class="teacher-actions">{language_link("/teacher", language)} {sign_out}</div>
 </section>""")
+
+
+def pass_the_city_controls(session, t, notice):
+    if session.swapped:
+        return f'<p class="experiment-status" role="status">{t["pass_done"]}</p>'
+    alert = f'<p class="alert" role="alert">{t["pass_waiting"]}</p>' if notice == "waiting-for-groups" else ""
+    return f"""<p>{t["pass_help"]}</p>
+{alert}
+<form class="inline" action="/teacher/pass-the-city?lang={session.language}" method="post">
+  <button name="code" value="{session.code}">{t["pass_the_city"]}</button>
+</form>"""
 
 
 def projection(session, url):
@@ -225,6 +245,7 @@ def choose_site(session, taken=False):
 def group_opening(session, group, *, notice=""):
     language, site = group.language, group.site
     t = words(language, COPY)
+    handoff = f'<p class="experiment-status">{t["partner_site"]}</p>' if session.swapped else ""
     return page(language, t["puzzle"], f"""
 <section class="panel">
   <div class="opening">
@@ -234,8 +255,9 @@ def group_opening(session, group, *, notice=""):
   </div>
   <section class="site">
     <p class="site-note">{t["imagined"]}</p>
-    <h2>{t[site]}</h2>
+    <h2 id="current-site">{t[site]}</h2>
+    {handoff}
     <p>{t["site_" + site]}</p>
     {spring_investigation(session, group, notice)}
   </section>
-</section>""", layout="wide", session=session)
+</section>""", layout="wide", session=session, watch_swap=True)

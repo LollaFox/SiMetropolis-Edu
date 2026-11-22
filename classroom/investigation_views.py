@@ -24,6 +24,8 @@ COPY = {
     "entrances": ("Tunnel entrances", "隧道出入口"),
     "map_key": ("Map key", "圖例"),
     "test": ("Test crossing", "測試走線"),
+    "save": ("Save for swap", "儲存走線以交換場地"),
+    "saved": ("Crossing saved for Pass the City.", "已儲存走線，交換場地後可繼續測試。"),
     "comparison": ("Compare the same spring site", "比較同一個春季場地"),
     "proposed": ("With proposed works", "有擬議工程"),
     "baseline": ("Without proposed works", "無擬議工程"),
@@ -71,14 +73,19 @@ def select_control(key, choices, current, t):
 def spring_investigation(session, group, notice):
     t = words(group.language, COPY)
     draft = group.draft_design
+    design_action = f"/join/{session.code}/design?lang={group.language}"
+    save = "" if session.swapped else f"""<button class="secondary" formaction="{design_action}"
+      name="save" value="1">{t["save"]}</button>"""
     return f"""<section class="investigation" id="spring-investigation" aria-labelledby="spring-title">
   <h3 id="spring-title">{t["spring"]}</h3>
   <form class="crossing-controls" id="crossing-design" action="/join/{session.code}/view?lang={group.language}" method="post">
+    <input type="hidden" name="site" value="{group.site}">
     {select_control("alignment", ALIGNMENTS, draft.alignment, t)}
     {select_control("crossing_type", CROSSING_TYPES, draft.crossing_type, t)}
     {select_control("access", ACCESS_ROUTES, draft.access_route, t)}
     <div class="design-actions">
-      <button formaction="/join/{session.code}/design?lang={group.language}">{t["test"]}</button>
+      <button formaction="{design_action}">{t["test"]}</button>
+      {save}
       <button class="secondary" name="view" value="reset">{t["reset"]}</button>
     </div>
   </form>
@@ -100,7 +107,7 @@ def spring_comparison(group, t, notice):
         keys.extend([design.crossing_type, *works])
     if overlaps:
         keys.append("overlap")
-    status = f'<p class="experiment-status" role="status">{t[notice]}</p>' if notice == "replayed" else ""
+    status = f'<p class="experiment-status" role="status">{t[notice]}</p>' if notice in {"replayed", "saved"} else ""
     return f"""<div id="spring-comparison">
   <div class="compare-controls" role="group" aria-label="{t["comparison"]}">
     {view_button("proposed", group.show_works, t)}

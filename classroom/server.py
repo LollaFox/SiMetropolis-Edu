@@ -103,7 +103,8 @@ class Handler(BaseHTTPRequestHandler):
             if teacher is None:
                 return Response(200, views.sign_in(language))
             session = self.classroom.class_for_teacher(teacher)
-            return Response(200, views.teacher(session.language if session else language, session))
+            notice = fields.get("notice", [""])[0]
+            return Response(200, views.teacher(session.language if session else language, session, notice=notice))
         if path == "/join":
             if "code" not in fields:
                 return Response(200, views.find_class(language))
@@ -124,7 +125,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/classes/"):
             code, _, action = path.removeprefix("/classes/").partition("/")
             if action == "status":
-                return Response(204 if self.classroom.active_class(code) else 410)
+                session = self.classroom.active_class(code)
+                if session is None:
+                    return Response(410)
+                return Response(204, headers=(("X-Sites-Swapped", str(session.swapped).lower()),))
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
             if detail in {"", "qr.png"}:
@@ -182,6 +186,19 @@ class Handler(BaseHTTPRequestHandler):
             if teacher is None or not self.classroom.end(teacher, code):
                 return Response(403)
             return self.redirect(f"/teacher?lang={language}")
+        if path == "/teacher/pass-the-city":
+            teacher = self.teacher_id()
+            if teacher is None:
+                return Response(403)
+            code = fields.get("code", [""])[0]
+            session = self.classroom.active_class(code)
+            if session is None:
+                return Response(410, views.unavailable(language))
+            if session.teacher != teacher:
+                return Response(403)
+            if not session.pass_the_city():
+                return self.redirect(f"/teacher?lang={language}&notice=waiting-for-groups")
+            return self.redirect(f"/teacher?lang={language}")
         if path.startswith("/join/"):
             code, separator, action = path.removeprefix("/join/").partition("/")
             if separator:
@@ -204,6 +221,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.redirect(join_path, cookie)
         if group is None or action not in {"language", "design", "view"}:
             return Response(404)
+        if fields.get("site", [""])[0] != group.site:
+            # An open form may still belong to the starting site when the teacher swaps.
+            return self.redirect(f"{join_path}&notice=swapped#current-site")
 
         draft = group.draft_design
         if action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}:
@@ -225,6 +245,9 @@ class Handler(BaseHTTPRequestHandler):
         elif action == "design":
             group.tested_design = draft
             group.show_works = True
+            if fields.get("save") == ["1"] and not session.swapped:
+                group.saved_design = draft
+                destination = f"{join_path}&notice=saved#spring-comparison"
         else:
             view = fields.get("view", [""])[0]
             if view not in {"proposed", "baseline", "replay", "reset"}:

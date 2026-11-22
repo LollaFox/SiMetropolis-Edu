@@ -5,6 +5,7 @@ from hashlib import sha256
 import secrets
 from threading import Lock
 from time import monotonic
+from typing import Optional
 
 from .investigation import Design
 
@@ -40,6 +41,7 @@ class Group:
     draft_design: Design = field(default_factory=Design)
     tested_design: Design = field(default_factory=Design)
     show_works: bool = True
+    saved_design: Optional[Design] = None
 
 
 @dataclass
@@ -49,6 +51,7 @@ class ClassSession:
     language: str
     expires_at: float
     groups: dict = field(default_factory=dict)
+    swapped: bool = False
 
     def occupied_sites(self):
         return {group.site for group in self.groups.values()}
@@ -59,6 +62,21 @@ class ClassSession:
         token = secrets.token_urlsafe(32)
         self.groups[token] = Group(site, self.language)
         return token
+
+    def pass_the_city(self):
+        if self.swapped:
+            return True
+        if len(self.groups) != len(SITES):
+            return False
+
+        first, second = self.groups.values()
+        first.site, second.site = second.site, first.site
+        for group in self.groups.values():
+            design = group.saved_design if group.saved_design is not None else group.tested_design
+            group.draft_design = group.tested_design = design
+            group.show_works = True
+        self.swapped = True
+        return True
 
 
 class Classroom:

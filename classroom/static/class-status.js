@@ -9,6 +9,13 @@ async function checkClass() {
       window.location.replace(page);
       return;
     }
+    if (classroom.dataset.sitesSwapped === 'false' && response.headers.get('X-Sites-Swapped') === 'true') {
+      const page = new URL(window.location.href);
+      page.searchParams.set('notice', 'swapped');
+      page.hash = 'current-site';
+      window.location.replace(page);
+      return;
+    }
   } catch {
     // Retry after a temporary network interruption.
   }
