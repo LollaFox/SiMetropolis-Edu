@@ -1,7 +1,9 @@
 """Choose a student join origin from the computer's connected IPv4 LAN adapters."""
 
 from ipaddress import IPv4Address
+import os
 from pathlib import Path
+import platform
 import re
 import socket
 import struct
@@ -17,6 +19,21 @@ def format_origin(scheme, host, port):
     default_port = 443 if scheme == "https" else 80
     suffix = f":{port}" if port not in {None, default_port} else ""
     return f"{scheme}://{host}{suffix}"
+
+
+def has_network_settings():
+    return sys.platform in {"darwin", "win32"}
+
+
+def open_network_settings():
+    if sys.platform == "win32":
+        os.startfile("ms-settings:network-status")
+    elif sys.platform == "darwin":
+        major = int(platform.mac_ver()[0].partition(".")[0] or "0")
+        target = ("x-apple.systempreferences:com.apple.Network-Settings.extension" if major >= 13
+                  else "/System/Library/PreferencePanes/Network.prefPane")
+        subprocess.run(["/usr/bin/open", target], check=True, timeout=5,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _output(*command):

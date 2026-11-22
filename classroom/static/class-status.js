@@ -3,6 +3,26 @@ const comparisons = classroom.querySelector('[data-comparison-feed]');
 const statusUrl = comparisons ? comparisons.dataset.comparisonFeed : classroom.dataset.classStatus;
 const countdown = classroom.querySelector('[data-remaining-ms]');
 const countdownDeadline = countdown ? watchCountdown(countdown) : 0;
+const networkNotice = classroom.querySelector('[data-network-notice]');
+const networkSettings = networkNotice?.querySelector('[data-network-settings]');
+const networkSettingsError = networkNotice?.querySelector('[data-network-settings-error]');
+
+networkSettings?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = networkSettings.querySelector('button');
+  button.disabled = true;
+  networkSettingsError.hidden = true;
+  try {
+    const response = await fetch(networkSettings.action, {
+      method: 'POST', body: new URLSearchParams(new FormData(networkSettings)),
+    });
+    networkSettingsError.hidden = response.ok;
+  } catch {
+    networkSettingsError.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 function watchCountdown(timer) {
   const navigation = performance.getEntriesByType('navigation')[0];
@@ -29,6 +49,31 @@ function leaveClass(status) {
   window.location.replace(page);
 }
 
+function updateNetwork(joinUrl) {
+  const joinLink = classroom.querySelector('[data-join-link]');
+  if (joinUrl && joinLink && joinLink.getAttribute('href') !== joinUrl) {
+    const entry = new URL('/join', joinUrl);
+    const codeLink = classroom.querySelector('[data-code-link]');
+    codeLink.textContent = entry.href;
+    entry.search = new URL(joinUrl).search;
+    codeLink.href = entry.href;
+    joinLink.href = joinLink.textContent = joinUrl;
+  }
+
+  const qr = classroom.querySelector('[data-join-qr]');
+  if (joinUrl && qr) {
+    const source = new URL(qr.dataset.joinQr, window.location.origin);
+    source.searchParams.set('join', joinUrl);
+    if (qr.src !== source.href || (qr.complete && qr.naturalWidth === 0)) {
+      qr.removeAttribute('src');
+      qr.src = source.href;
+    }
+  }
+  networkNotice.hidden = Boolean(joinUrl);
+  if (joinUrl && networkSettingsError) networkSettingsError.hidden = true;
+  for (const element of classroom.querySelectorAll('[data-network-ready]')) element.hidden = !joinUrl;
+}
+
 async function checkClass() {
   try {
     const response = await fetch(statusUrl, { cache: 'no-store' });
@@ -36,6 +81,9 @@ async function checkClass() {
       classroom.replaceChildren();
       leaveClass(response.status);
       return;
+    }
+    if (networkNotice && response.status === 204) {
+      updateNetwork(response.headers.get('X-Join-Url'));
     }
     if (comparisons && response.ok) {
       const choices = document.createElement('template');
