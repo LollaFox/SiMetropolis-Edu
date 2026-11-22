@@ -45,25 +45,33 @@ class ExpiredLaunchTicket(Exception):
 
 
 class TeacherLaunch:
-    def __init__(self, credential):
+    def __init__(self, credential, key):
         self._credential = credential
-        self.renew()
+        self._authorization = f"Bearer {key}".encode()
+        self._tickets = {}
+        self._has_signed_in = False
 
-    def renew(self):
-        self.ticket = secrets.token_urlsafe(32)
-        self._expires_at = monotonic() + 120
+    def authorizes(self, authorization):
+        return secrets.compare_digest(self._authorization, authorization.encode())
 
-    def is_pending(self, ticket):
-        return self._credential is not None and secrets.compare_digest(self.ticket.encode(), ticket.encode())
+    def issue_ticket(self):
+        now = monotonic()
+        self._tickets = {ticket: expires for ticket, expires in self._tickets.items() if expires > now}
+        ticket = secrets.token_urlsafe(32)
+        self._tickets[ticket] = now + 120
+        return ticket
+
+    def is_only_pending(self, ticket):
+        return not self._has_signed_in and self._tickets.keys() == {ticket}
 
     def redeem(self, ticket):
-        if not self.is_pending(ticket):
+        expires = self._tickets.pop(ticket, None)
+        if expires is None:
             return None
-        if monotonic() >= self._expires_at:
+        if monotonic() >= expires:
             raise ExpiredLaunchTicket
-        credential = self._credential
-        self._credential = None
-        return credential
+        self._has_signed_in = True
+        return self._credential
 
 
 def student_join_path(session, *, language=None):
@@ -297,6 +305,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path, language, _ = self.request_target()
+        if path == "/teacher/launch-ticket":
+            return self.respond(self.reopen_teacher())
         expected = self.local_request_origin() if self.server.lan is not None else self.server.origin
         if expected is None or self.headers.get("Origin") != expected:
             return self.respond(Response(403))
@@ -308,6 +318,16 @@ class Handler(BaseHTTPRequestHandler):
             response = self.post_page(path, language, fields)
         self.respond(response)
 
+    def reopen_teacher(self):
+        if (not self.is_local_teacher_launch() or self.headers.get("Origin") is not None
+                or not self.server.teacher_launch.authorizes(self.headers.get("Authorization", ""))):
+            return Response(403)
+        with self.classroom.lock:
+            if self.server.browser_open_failed:
+                return Response(503)
+            ticket = self.server.teacher_launch.issue_ticket()
+        return Response(200, ticket, content_type="text/plain; charset=utf-8")
+
     def post_page(self, path, language, fields):
         if path == "/teacher/launch" and self.is_local_teacher_launch():
             launch = self.server.teacher_launch
@@ -315,9 +335,12 @@ class Handler(BaseHTTPRequestHandler):
                 credential = launch.redeem(fields.get("ticket", [""])[0])
             except ExpiredLaunchTicket:
                 # Only the local browser opener receives the replacement link.
-                launch.renew()
                 open_teacher_browser(self.server)
                 return Response(202)
+            if credential is None:
+                return Response(403)
+            if self.teacher_id() is not None:
+                return Response(204)
             cookie = self.sign_in_teacher(credential)
             if cookie is None:
                 return Response(403)
@@ -433,9 +456,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
 
 
-def open_teacher_browser(server):
+def open_teacher_browser(server, *, initial=False):
     launch = server.teacher_launch
-    ticket = launch.ticket
+    ticket = launch.issue_ticket()
     # The browser fragment keeps the single-use ticket out of HTTP requests and referrers.
     url = f"{server.origin}/teacher/launch#{ticket}"
 
@@ -447,7 +470,7 @@ def open_teacher_browser(server):
             pass
         with server.classroom.lock:
             # A foreground opener can report failure after sign-in or renewal.
-            if not launch.is_pending(ticket):
+            if not initial or not launch.is_only_pending(ticket):
                 return
             server.browser_open_failed = True
         server.shutdown()
@@ -456,20 +479,21 @@ def open_teacher_browser(server):
     Thread(target=open_browser, daemon=True).start()
 
 
-def run(host, port, public_url, duration_seconds, credentials, *, launch_teacher=False):
+def run(host, port, public_url, duration_seconds, credentials, *, register_launcher=None):
     automatic_network = host is None and public_url is None
     bind_host = host or ("0.0.0.0" if automatic_network else "127.0.0.1")
     with ThreadingHTTPServer((bind_host, port), Handler) as server:
         server.classroom = Classroom(credentials, duration_seconds)
         server.origin = public_url or format_origin("http", "127.0.0.1", server.server_port)
         server.lan = ClassroomLan(server.server_port) if automatic_network else None
-        # Browsers share cookies across ports, even when two launchers run separate classrooms.
-        server.teacher_cookie_name = f"teacher_session_{server.server_port}" if launch_teacher else "teacher_session"
+        server.teacher_cookie_name = "teacher_session"
         server.teacher_launch = None
         server.browser_open_failed = False
-        if launch_teacher:
-            server.teacher_launch = TeacherLaunch(credentials.issue())
-            open_teacher_browser(server)
+        if register_launcher is not None:
+            # Separate installations can serve different classrooms. Browsers share cookies across ports.
+            server.teacher_cookie_name = f"teacher_session_{server.server_port}"
+            server.teacher_launch = TeacherLaunch(credentials.issue(), register_launcher(server.server_port))
+            open_teacher_browser(server, initial=True)
         else:
             print(server.origin, flush=True)
         try:

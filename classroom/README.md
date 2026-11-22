@@ -6,6 +6,8 @@ On a prepared Mac, double-click **Open SiMetropolis Edu** (`.command`).
 
 The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
+If you close the teacher tab during class, double-click **Open SiMetropolis Edu** again from the same installation. Your class reopens with the original join code and countdown. Groups can keep working in their existing tabs.
+
 If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
 
 ### Prepare a local checkout
@@ -78,7 +80,7 @@ The connected-class tests start the prepared launcher and use separate browser s
 
 To verify a classroom network, open the shortcut on the teacher’s computer and join from a second device on the same Wi-Fi or Ethernet. In an English class, follow the projected link and choose Site A. Start another class in 繁體中文, scan the QR and choose 場地 A, then use a fresh browser session on the student device to enter the short code and choose 場地 B.
 
-The launcher checks open the private sign-in link in Chromium, exercise language selection before class, and verify that a second browser cannot reuse the link.
+The launcher checks open the private sign-in link in Chromium, exercise language selection before class, verify that a second browser cannot reuse the link, and reopen a live class while a group keeps its tested crossing.
 
 On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. The test builds and extracts the teacher ZIP, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then stops the launcher and reopens the same package with component downloads blocked.
 

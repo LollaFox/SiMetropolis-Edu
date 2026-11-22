@@ -2,7 +2,6 @@
 
 import argparse
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 from .network import format_origin
@@ -43,11 +42,9 @@ def main():
         return
 
     if args.command == "launch":
-        from .server import run
+        from .launcher import launch
 
-        with TemporaryDirectory(prefix="simetropolis-edu-") as data:
-            run(None, 0, None, DEFAULT_CLASS_DURATION_SECONDS,
-                TeacherCredentials(Path(data) / "teachers"), launch_teacher=True)
+        launch(args.data_dir, DEFAULT_CLASS_DURATION_SECONDS)
         return
 
     if not 0 <= args.port <= 65535 or args.duration_seconds < 1:
