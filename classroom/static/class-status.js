@@ -6,6 +6,8 @@ async function checkClass() {
     if (response.status === 410) {
       const page = new URL(window.location.href);
       page.searchParams.set('lang', document.documentElement.lang);
+      // A fragment destination can keep the browser on the open-class document.
+      page.hash = '';
       window.location.replace(page);
       return;
     }

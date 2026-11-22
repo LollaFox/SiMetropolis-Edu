@@ -43,6 +43,13 @@ class Group:
     show_works: bool = True
     saved_design: Optional[Design] = None
 
+    def move_to_partner_site(self, site):
+        self.site = site
+        if self.saved_design is not None:
+            self.tested_design = self.saved_design
+        self.draft_design = self.tested_design
+        self.show_works = True
+
 
 @dataclass
 class ClassSession:
@@ -70,11 +77,9 @@ class ClassSession:
             return False
 
         first, second = self.groups.values()
-        first.site, second.site = second.site, first.site
-        for group in self.groups.values():
-            design = group.saved_design if group.saved_design is not None else group.tested_design
-            group.draft_design = group.tested_design = design
-            group.show_works = True
+        first_site = first.site
+        first.move_to_partner_site(second.site)
+        second.move_to_partner_site(first_site)
         self.swapped = True
         return True
 

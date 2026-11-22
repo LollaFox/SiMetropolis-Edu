@@ -479,8 +479,14 @@ test('Pass the City applies each saved crossing at the partner site', { timeout:
   await teacher.getByRole('alert').getByText('Both groups need to join before you can swap sites.').waitFor();
   const groupB = await groupAt('B');
 
+  const timing = groupA.getByLabel('Construction season', { exact: true });
+  const hasTiming = await timing.count() > 0;
+  if (hasTiming) {
+    await timing.selectOption('summer');
+    await groupA.getByRole('button', { name: 'Summer', exact: true }).click();
+  }
   await groupA.getByLabel('Crossing type').selectOption('tunnel');
-  await groupA.getByLabel('Construction access route').selectOption('valley');
+  await groupA.getByLabel('Construction access route', { exact: true }).selectOption('valley');
   await groupA.getByRole('button', { name: 'Save for swap' }).click();
   await groupA.getByRole('status').getByText('Crossing saved for Pass the City.').waitFor();
   await groupA.getByText('Possible disturbance', { exact: true }).waitFor();
@@ -491,6 +497,10 @@ test('Pass the City applies each saved crossing at the partner site', { timeout:
   await groupB.getByText('Possible disturbance', { exact: true }).waitFor();
 
   await groupA.getByLabel('Railway alignment').selectOption('south');
+  await groupA.getByLabel('Crossing type').selectOption('elevated');
+  if (hasTiming) await timing.selectOption('winter');
+  await groupA.getByRole('button', { name: 'Test crossing' }).click();
+  await groupA.getByRole('list', { name: 'Map key' }).getByText('Elevated railway', { exact: true }).waitFor();
   await groupA.getByRole('button', { name: 'Without proposed works' }).click();
   const join = new URL(joinUrl);
   const code = join.pathname.split('/').pop();
@@ -504,13 +514,16 @@ test('Pass the City applies each saved crossing at the partner site', { timeout:
     groupA.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor(),
     groupB.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor(),
   ]);
-  for (const [group, alignment, crossing, access, work] of [
-    [groupA, 'central', 'tunnel', 'valley', 'Tunnel entrances'],
-    [groupB, 'north', 'elevated', 'east', 'Bridge supports'],
+  for (const [group, alignment, crossing, access, work, season] of [
+    [groupA, 'central', 'tunnel', 'valley', 'Tunnel entrances', 'summer'],
+    [groupB, 'north', 'elevated', 'east', 'Bridge supports', 'spring'],
   ]) {
     assert.equal(await group.getByLabel('Railway alignment').inputValue(), alignment);
     assert.equal(await group.getByLabel('Crossing type').inputValue(), crossing);
-    assert.equal(await group.getByLabel('Construction access route').inputValue(), access);
+    assert.equal(await group.getByLabel('Construction access route', { exact: true }).inputValue(), access);
+    if (hasTiming) {
+      assert.equal(await group.getByLabel('Construction season', { exact: true }).inputValue(), season);
+    }
     await group.getByRole('list', { name: 'Map key' }).getByText(work, { exact: true }).waitFor();
     await group.getByText('No modelled overlap', { exact: true }).waitFor();
   }
@@ -522,13 +535,14 @@ test('Pass the City applies each saved crossing at the partner site', { timeout:
 
   await groupA.getByRole('button', { name: '繁體中文' }).click();
   await groupA.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
-  assert.equal(await groupA.getByLabel('鐵路走線').inputValue(), 'central');
+  assert.equal(await groupA.getByLabel('鐵路走線', { exact: true }).inputValue(), 'central');
   assert.equal(await groupA.getByLabel('鐵路形式').inputValue(), 'tunnel');
-  assert.equal(await groupA.getByLabel('施工通道').inputValue(), 'valley');
+  assert.equal(await groupA.getByLabel('施工通道', { exact: true }).inputValue(), 'valley');
+  if (hasTiming) assert.equal(await groupA.getByLabel('施工季節', { exact: true }).inputValue(), 'summer');
   await groupA.getByRole('button', { name: '重播走線測試' }).click();
   await groupA.getByRole('status').getByText('已重播走線測試。').waitFor();
   await groupA.getByText('模型未顯示重疊', { exact: true }).waitFor();
-  await groupA.getByLabel('鐵路走線').selectOption('north');
+  await groupA.getByLabel('鐵路走線', { exact: true }).selectOption('north');
   await groupA.getByRole('button', { name: '測試走線' }).click();
   await groupA.getByText('可能造成滋擾', { exact: true }).waitFor();
   await groupA.getByRole('button', { name: '重設走線' }).click();
@@ -558,4 +572,29 @@ test('an unsaved group can swap without a stale form replacing its last tested c
   assert.equal(await groupA.getByLabel('Railway alignment').inputValue(), 'central');
   assert.equal(await groupA.getByLabel('Crossing type').inputValue(), 'tunnel');
   assert.equal(await groupA.getByLabel('Construction access route').inputValue(), 'east');
+});
+
+test('a language switch during the swap keeps the saved crossing and both partner screens close with the class', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher } = await startInvestigation(t);
+  const groupA = await groupAt('A');
+  const groupB = await groupAt('B');
+
+  // Delay the swap notification so the group submits the form it still sees at Site A.
+  await groupA.route('**/classes/*/status', route => route.abort());
+  await groupA.getByLabel('Crossing type').selectOption('tunnel');
+  await groupA.getByRole('button', { name: 'Save for swap' }).click();
+  await groupA.getByText('Crossing saved for Pass the City.', { exact: true }).waitFor();
+  await groupA.getByLabel('Crossing type').selectOption('elevated');
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  await groupA.getByRole('button', { name: '繁體中文' }).click();
+  await groupA.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
+  assert.equal(await groupA.getByLabel('鐵路形式').inputValue(), 'tunnel');
+  await groupA.unroute('**/classes/*/status');
+  await groupB.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+
+  await teacher.getByRole('button', { name: 'End class' }).click();
+  await Promise.all([
+    groupA.getByRole('heading', { name: '這個課堂已結束' }).waitFor(),
+    groupB.getByRole('heading', { name: 'This class is closed' }).waitFor(),
+  ]);
 });

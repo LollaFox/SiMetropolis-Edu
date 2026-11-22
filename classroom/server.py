@@ -13,7 +13,7 @@ from qrcode.image.pure import PyPNGImage
 
 from . import views
 from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
-from .state import Classroom
+from .state import Classroom, ClassSession
 
 
 STATIC = Path(__file__).with_name("static")
@@ -68,6 +68,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def teacher_id(self):
         return self.classroom.teacher_for_session(self.cookie_value("teacher_session"))
+
+    def owned_class(self, code, language) -> Union[ClassSession, Response]:
+        teacher = self.teacher_id()
+        if teacher is None:
+            return Response(403)
+        session = self.classroom.active_class(code)
+        if session is None:
+            return Response(410, views.unavailable(language))
+        if session.teacher != teacher:
+            return Response(403)
+        return session
 
     def session_cookie(self, name, value, path, *, clear=False):
         secure = "; Secure" if self.server.origin.startswith("https://") else ""
@@ -132,14 +143,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
             if detail in {"", "qr.png"}:
-                teacher = self.teacher_id()
-                if teacher is None:
-                    return Response(403)
-                session = self.classroom.active_class(code)
-                if session is None:
-                    return Response(410, views.unavailable(language))
-                if session.teacher != teacher:
-                    return Response(403)
+                session = self.owned_class(code, language)
+                if isinstance(session, Response):
+                    return session
                 join_url = self.server.origin + student_join_path(session)
                 if detail == "qr.png":
                     image = BytesIO()
@@ -187,15 +193,10 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(403)
             return self.redirect(f"/teacher?lang={language}")
         if path == "/teacher/pass-the-city":
-            teacher = self.teacher_id()
-            if teacher is None:
-                return Response(403)
             code = fields.get("code", [""])[0]
-            session = self.classroom.active_class(code)
-            if session is None:
-                return Response(410, views.unavailable(language))
-            if session.teacher != teacher:
-                return Response(403)
+            session = self.owned_class(code, language)
+            if isinstance(session, Response):
+                return session
             if not session.pass_the_city():
                 return self.redirect(f"/teacher?lang={language}&notice=waiting-for-groups")
             return self.redirect(f"/teacher?lang={language}")
@@ -221,12 +222,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.redirect(join_path, cookie)
         if group is None or action not in {"language", "design", "view"}:
             return Response(404)
-        if fields.get("site", [""])[0] != group.site:
-            # An open form may still belong to the starting site when the teacher swaps.
-            return self.redirect(f"{join_path}&notice=swapped#current-site")
-
+        current_site = fields.get("site", [""])[0] == group.site
         draft = group.draft_design
-        if action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}:
+        if current_site and (action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}):
             alignment = fields.get("alignment", [""])[0]
             crossing_type = fields.get("crossing_type", [""])[0]
             access_route = fields.get("access", [""])[0]
@@ -235,31 +233,36 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(400)
             draft = Design(alignment, crossing_type, access_route)
 
-        destination = f"{join_path}#spring-comparison"
+        anchor = "#spring-comparison"
+        notice = ""
         if action == "language":
             preferred = fields.get("language", [""])[0]
             if preferred not in views.LANGUAGES:
                 return Response(400)
             group.language = preferred
-            destination = join_path
-        elif action == "design":
+            anchor = ""
+
+        # A language preference travels with the group. Design and view actions belong to the site.
+        if not current_site:
+            return self.redirect(f"{join_path}&notice=swapped#current-site")
+        if action == "design":
             group.tested_design = draft
             group.show_works = True
             if fields.get("save") == ["1"] and not session.swapped:
                 group.saved_design = draft
-                destination = f"{join_path}&notice=saved#spring-comparison"
-        else:
+                notice = "&notice=saved"
+        elif action == "view":
             view = fields.get("view", [""])[0]
             if view not in {"proposed", "baseline", "replay", "reset"}:
                 return Response(400)
             group.show_works = view != "baseline"
             if view == "reset":
                 draft = group.tested_design = Design()
-                destination = f"{join_path}#spring-investigation"
+                anchor = "#spring-investigation"
             elif view == "replay":
-                destination = f"{join_path}&notice=replayed#spring-comparison"
+                notice = "&notice=replayed"
         group.draft_design = draft
-        return self.redirect(destination)
+        return self.redirect(f"{join_path}{notice}{anchor}")
 
 
 def run(host, port, public_url, duration_seconds, credentials):
