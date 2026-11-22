@@ -1,6 +1,44 @@
 # Long Valley classroom
 
-Run these commands from the repository root with Python 3.9 or newer.
+On macOS 12 or later, extract `SiMetropolis-Edu-Mac.zip` and double-click **Open SiMetropolis Edu**. The first launch downloads about 24 MB. If the download stops, check your connection and select **Retry**. After setup, you can open lesson preparation while disconnected.
+
+On Windows, extract `SiMetropolis-Edu-Windows.zip` to a local folder and double-click **Open SiMetropolis Edu**. Keep the computer connected to the internet for first-use setup. The launcher shows download progress and offers **Retry** if a download is interrupted. After setup, you can open the same copy while disconnected.
+
+On a prepared Mac checkout, double-click **Open SiMetropolis Edu** (`.command`).
+
+The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
+
+If Edu loses the classroom network or you start while disconnected, the timer keeps running. Select **Open network settings** if you need to reconnect the computer. Edu retries automatically and restores the join information for the same class when it finds a usable address.
+
+If a returning group scans the restored QR and sees **Choose your starting site**, open **Help a group rejoin** in the private teacher tab. Select the site where the group **started**, even after **Pass the City**, and choose **Get group rejoin code**. Give the code privately to that group. On its device, the group enters the code and selects **Rejoin my group** to reopen its current site with its recorded crossing and chosen language. Each code works once. If the group needs another, select its starting site again to see the current code.
+
+If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
+
+### Prepare a local checkout
+
+The shortcuts can use a Python 3.9 or newer virtual environment named `.venv` beside the launchers. Windows sets up a private runtime in `runtime/windows` when it needs one. To prepare a checkout for testing with your own Python, run the commands for your platform from the repository root.
+
+Mac:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r classroom/requirements.txt
+```
+
+Windows:
+
+```bat
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r classroom\requirements.txt
+```
+
+### Build the Windows download
+
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-windows-download.ps1` from the repository root. The release asset is `dist/SiMetropolis-Edu-Windows.zip`. It contains the classroom and its launcher. The launcher downloads the embeddable Python archive and pure Python wheels pinned in `tools/windows-classroom-components.json`. Update those wheel pins when changing the classroom dependencies.
+
+### Manual server setup
+
+To run the server and sign in manually, use these commands from the repository root with Python 3.9 or newer.
 
 ```sh
 python3 -m venv /tmp/long-valley-venv
@@ -22,11 +60,13 @@ Each group can select **Save for swap** to keep the crossing it wants to try at 
 
 Connected group screens switch as soon as they receive the teacher’s swap. If a device loses its connection or resumes from the background while showing its starting site, it hides that map until the classroom confirms the current site.
 
-The class lasts 45 minutes by default. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
+The 45-minute countdown starts when you select **Start class**. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
 
 ## Group devices
 
-For devices on a trusted local network, bind to the teacher computer’s LAN address and use the same address in the public URL. Replace the example address with the teacher computer’s address, and open the teacher view through that URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
+The shortcut and the default `serve` command listen on local IPv4 interfaces. The launcher opens the private teacher view on the teacher’s computer. The projection uses a connected Wi-Fi or Ethernet address so groups on the same network can join. The classroom network must allow connections between devices.
+
+For testing on one device, use `serve --host 127.0.0.1`. To specify a fixed address, use `--host` and `--public-url` together, then open the teacher view through the public URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
 
 ```sh
 python -B -m classroom serve --host 192.168.1.10 --public-url http://192.168.1.10:8899
@@ -40,8 +80,33 @@ Install Playwright and jsQR in an external test directory. Set `PLAYWRIGHT_PATH`
 node --test tools/check_long_valley.mjs
 ```
 
-The tests launch an isolated loopback classroom and use independent browser contexts for teachers and groups. They verify that only the class teacher can load the projection and its QR image. They decode the QR, join both sites, and exercise both languages. They also check manual ending, expiry, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
+The connected-class tests start the prepared launcher and use separate browser sessions on the same computer to join through its LAN address. They cover both opening languages, all three join methods and teacher ownership. The timer test checks that reloading the teacher view preserves the original deadline. Run `python -B -m unittest discover -s tests -p test_classroom_network.py` for adapter-selection checks.
+
+To verify a classroom network, open the shortcut on the teacher’s computer and join from a second device on the same Wi-Fi or Ethernet. In an English class, follow the projected link and choose Site A. Start another class in 繁體中文, scan the QR and choose 場地 A, then use a fresh browser session on the student device to enter the short code and choose 場地 B.
+
+On Mac and Windows, verify recovery both before starting and during a lesson. Disconnect Wi-Fi and Ethernet, check that the timer keeps running and the join information is hidden, then use **Open network settings** to reconnect. Keep the teacher and projection tabs open. Check that the notice clears, the original class code reappears, and the second device can join with the restored QR or link. To check a change of address during a lesson, have both groups save different crossings before disconnecting. After reconnecting, have each group scan the restored QR and rejoin with its individual code. Check both crossings and assigned sites.
+
+The launcher checks open the private sign-in link in Chromium, exercise language selection before class, and verify that a second browser cannot reuse the link.
+
+On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. The test builds and extracts the teacher ZIP, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then stops the launcher and reopens the same package with component downloads blocked.
+
+```powershell
+$env:WINDOWS_DOWNLOAD_TEST = '1'
+node --test --test-name-pattern="Windows download" tools/check_long_valley.mjs
+```
+
+The prepared-shortcut checks on Mac and Windows use a temporary virtual environment. To run those checks offline, download the wheels beforehand with `python -m pip download -r classroom/requirements.txt -d wheels`. Set `PIP_NO_INDEX=1` and set `PIP_FIND_LINKS` to the wheel directory's file URL, for example `file:///C:/classroom%20tests/wheels`.
 
 The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
 
 The sharing checks verify in both languages that a teacher can project the original maps and evidence after the group changes its crossing, replays, and resets. They also verify that a new share leaves the selected projection in place and that comparisons are private to the class teacher.
+
+## Building and verifying the Mac download
+
+Use macOS with Xcode selected and Python 3 with pip. To create the ZIP for local testing, run `python3 tools/build_mac_classroom.py /tmp/SiMetropolis-Edu-Mac.zip`. The app includes both Mac architectures and the classroom’s Python dependencies. It downloads a pinned [standalone Python runtime](https://github.com/astral-sh/python-build-standalone/releases/tag/20261110) for the current architecture, verifies its SHA-256, and keeps it in the teacher’s Application Support folder.
+
+Pass `--signing-identity "Developer ID Application: …"` and `--notary-profile PROFILE` together to build the distribution ZIP. The script signs the app, submits it to Apple, and packages it with the stapled ticket. It extracts the final ZIP and checks the ticket, signature, and Gatekeeper assessment. Link the signed and notarized ZIP from the project download page after verifying it on a clean Mac. See [Apple's distribution testing guidance](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
+
+Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and repeats with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
+
+To check the distribution ZIP, download it in a browser on a clean Mac, extract it in Finder, and double-click **Open SiMetropolis Edu**. Interrupt the runtime transfer and verify **Retry** opens the private teacher page after reconnecting. Quit the launcher, disconnect Wi-Fi and Ethernet, and double-click the same app again. Lesson preparation should open in the browser.

@@ -1,5 +1,6 @@
 /backend/.data/
 /classroom/.data/
+/.venv/
 __pycache__/
 *.pyc
 
@@ -9,3 +10,4 @@ sandbox/.data/
 __pycache__/
 
 /runtime/
+/dist/
