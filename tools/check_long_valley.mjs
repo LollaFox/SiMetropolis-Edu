@@ -714,6 +714,11 @@ test('the Windows download retries interrupted setup and reopens lesson preparat
     await returning.goto(offline.launchUrl.href);
     await returning.waitForURL(`${offline.launchUrl.origin}/teacher`);
     await returning.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor();
+    await t.test('the installed Windows download reopens the live class and its tested crossing',
+      lanTest, async () => {
+        await returning.getByRole('button', { name: 'Start class' }).click();
+        await checkLiveClassReopens(returning, offline);
+      });
   } finally {
     // Registered after the launcher hooks so even a failed launch releases its runtime first.
     t.after(() => rm(temporary, { recursive: true, force: true }));
@@ -729,7 +734,7 @@ test('a slow browser profile selection renews its link after another launch', { 
   const code = await teacher.getByRole('button', { name: 'End class' }).getAttribute('value');
   const delayedTab = await participant(browser);
   const [renewedUrl] = await Promise.all([nextLaunchUrl(), delayedTab.goto(launchUrl.href)]);
-  await delayedTab.getByText('Your sign-in link expired. Continue in the new teacher tab.').waitFor();
+  await delayedTab.getByText('If no tab opens, double-click Open SiMetropolis Edu again.', { exact: false }).waitFor();
   await delayedTab.goto(`${launchUrl.origin}/teacher`);
   await delayedTab.getByLabel('Teacher credential').waitFor();
   await delayedTab.goto(launchUrl.href);
@@ -815,9 +820,13 @@ test('a second installation preserves the first teacher session in the same brow
 });
 
 test('reopening the launcher returns to the live lesson and the group keeps its crossing', lanTest, async (t) => {
-  const { browser, launchUrl, relaunch } = await launchClassroom(t, { shortcut: hasNativeShortcut });
-  const teacher = await participant(browser);
-  await startConnectedClass(teacher, launchUrl, 'English');
+  const classroom = await launchClassroom(t, { shortcut: hasNativeShortcut });
+  const teacher = await participant(classroom.browser);
+  await startConnectedClass(teacher, classroom.launchUrl, 'English');
+  await checkLiveClassReopens(teacher, classroom);
+});
+
+async function checkLiveClassReopens(teacher, { browser, launchUrl, relaunch }) {
   const projector = await openProjection(teacher);
   const code = await projector.locator('code').innerText();
   const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
@@ -835,7 +844,6 @@ test('reopening the launcher returns to the live lesson and the group keeps its 
     return readAt + (minutes * 60 + seconds) * 1000;
   }
 
-  // Let the countdown leave its starting value so a reset would be observable.
   await teacher.waitForFunction(() => document.querySelector('[role="timer"]').textContent < '44:58');
   const deadline = await displayedDeadline(teacher);
   const teacherContext = teacher.context();
@@ -846,7 +854,6 @@ test('reopening the launcher returns to the live lesson and the group keeps its 
   await tunnel.waitFor();
 
   const [first, second] = await Promise.all([relaunch(), relaunch()]);
-  // The second tab uses a fresh browser profile with no existing teacher cookie.
   for (const [reopened, newTeacher] of [
     [first, await teacherContext.newPage()], [second, await participant(browser)],
   ]) {
@@ -865,7 +872,7 @@ test('reopening the launcher returns to the live lesson and the group keeps its 
   await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
   await group.getByRole('button', { name: 'Replay crossing' }).click();
   await tunnel.waitFor();
-});
+}
 
 test('only the class owner can open the projection and load its QR image', { timeout: 30000 }, async (t) => {
   const { browser, issueCredential, origin } = await classroom(t);

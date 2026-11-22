@@ -62,6 +62,11 @@ class MacClassroomPackageTests(unittest.TestCase):
         self.assertEqual(set(architectures.split()), {"arm64", "x86_64"})
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", self.app], check=True)
 
+    @unittest.skipUnless(os.environ.get("SIMETROPOLIS_MAC_TEST_ZIP"), "requires a distribution ZIP")
+    def test_gatekeeper_accepts_the_downloaded_app(self):
+        subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose", self.app], check=True)
+        subprocess.run(["/usr/bin/xcrun", "stapler", "validate", self.app], check=True)
+
     @unittest.skipUnless(RUNTIME_ARCHIVE, "set SIMETROPOLIS_MAC_TEST_ARCHIVE to the native runtime tarball")
     def test_a_fresh_mac_opens_private_lesson_preparation_and_can_relaunch_offline(self):
         self.exercise_first_launch(interrupt=False)

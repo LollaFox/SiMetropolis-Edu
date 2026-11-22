@@ -16,7 +16,7 @@ If a returning group scans the restored QR and sees **Choose your starting site*
 
 If you close the teacher tab during class, double-click **Open SiMetropolis Edu** again from the same installation. Your class reopens with the original join code and countdown. Groups can keep working in their existing tabs.
 
-If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
+If your sign-in link expires while you choose a browser profile, continue in the new teacher tab. If no tab opens, double-click **Open SiMetropolis Edu** again.
 
 ### Prepare a local checkout
 
@@ -94,7 +94,7 @@ The launcher checks open the private sign-in link in Chromium, exercise language
 
 The launcher checks use Chromium to reopen a live class while a group keeps its tested crossing. They also cover separate installations used by the same teacher, a Mac checkout with a read-only classroom directory, and a delayed browser profile selection that overlaps another launch.
 
-On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. Set `WINDOWS_DOWNLOAD_ZIP` to the downloaded ZIP to test that archive. The test extracts the archive, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then stops the launcher and reopens the same package with component downloads blocked.
+On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. Set `WINDOWS_DOWNLOAD_ZIP` to the downloaded ZIP to test that archive. The test extracts the archive, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then reopens the same package with component downloads blocked. On a connected LAN, it starts a class, tests a crossing, and reopens the teacher tab to check the code, deadline, and crossing.
 
 ```powershell
 $env:WINDOWS_DOWNLOAD_TEST = '1'
@@ -113,7 +113,7 @@ Use macOS with Xcode selected and Python 3 with pip. To create the ZIP for local
 
 Pass `--signing-identity "Developer ID Application: …"` and `--notary-profile PROFILE` together to build the distribution ZIP. The script signs the app, submits it to Apple, and packages it with the stapled ticket. It extracts the final ZIP and checks the ticket, signature, and Gatekeeper assessment. Use this signed and notarized archive for distribution. See [Apple's distribution testing guidance](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
 
-Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. Set `SIMETROPOLIS_MAC_TEST_ZIP` to inspect a downloaded ZIP. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and reopens a running class with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
+Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. Set `SIMETROPOLIS_MAC_TEST_ZIP` to the downloaded distribution ZIP to check Gatekeeper and the stapled ticket on the unmodified app. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and reopens a running class with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
 
 ## Verify the teacher downloads
 
