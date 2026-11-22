@@ -78,6 +78,9 @@ class ClassSession:
     comparisons: dict = field(default_factory=dict)
     swap_or_end: Event = field(default_factory=Event, init=False, repr=False, compare=False)
 
+    def remaining_seconds(self):
+        return max(0.0, self.expires_at - monotonic())
+
     def occupied_sites(self):
         return {group.site for group in self.groups.values()}
 
@@ -131,7 +134,7 @@ class Classroom:
 
     def active_class(self, code):
         session = self.classes.get(code)
-        if session is not None and session.expires_at <= monotonic():
+        if session is not None and session.remaining_seconds() == 0:
             del self.classes[code]
             session.swap_or_end.set()
             return None

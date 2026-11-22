@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
 import { networkInterfaces, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,12 +17,25 @@ const python = process.env.PYTHON || 'python3';
 const lanAddresses = Object.values(networkInterfaces()).flat()
   .filter(({ family, internal }) => family === 'IPv4' && !internal).map(({ address }) => address);
 const lanTest = { timeout: 30000, skip: !lanAddresses.length && 'Needs a connected IPv4 interface' };
+const nativeShortcut = { darwin: 'Open SiMetropolis Edu.command', win32: 'Open SiMetropolis Edu.cmd' }[process.platform];
 
-async function classroom(t, ...options) {
-  return startClassroom(t, '--host', '127.0.0.1', ...options);
+async function openClassroomBrowser(t, child, closed, browser) {
+  const output = createInterface({ input: child.stdout });
+  function nextLaunchUrl() {
+    return Promise.race([
+      once(output, 'line', { signal: AbortSignal.timeout(10000) }).then(([line]) => new URL(line)),
+      closed.then(([code]) => { throw new Error(`Classroom exited with code ${code} before reporting its URL`); }),
+    ]);
+  }
+  const launchUrl = await nextLaunchUrl();
+  if (!browser) {
+    browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, timeout: 10000 });
+    t.after(() => browser.close());
+  }
+  return { browser, launchUrl, nextLaunchUrl };
 }
 
-async function startClassroom(t, ...options) {
+async function classroom(t, ...options) {
   const data = await mkdtemp(join(tmpdir(), 'long-valley-test-'));
   t.after(() => rm(data, { recursive: true, force: true }));
   const command = ['-B', '-m', 'classroom', '--data-dir', data];
@@ -31,7 +44,7 @@ async function startClassroom(t, ...options) {
       cwd: root, encoding: 'utf8',
     }).trim();
   }
-  const server = spawn(python, [...command, 'serve', '--port', '0', ...options], {
+  const server = spawn(python, [...command, 'serve', '--host', '127.0.0.1', '--port', '0', ...options], {
     cwd: root, stdio: ['ignore', 'pipe', 'inherit'],
   });
   const closed = once(server, 'close');
@@ -39,14 +52,88 @@ async function startClassroom(t, ...options) {
     server.kill();
     await closed;
   });
-  const output = createInterface({ input: server.stdout });
-  const origin = await Promise.race([
-    once(output, 'line').then(([line]) => new URL(line).origin),
-    closed.then(([code]) => { throw new Error(`Classroom exited with code ${code}`); }),
-  ]);
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, timeout: 10000 });
-  t.after(() => browser.close());
-  return { browser, issueCredential, origin };
+  const { browser, launchUrl } = await openClassroomBrowser(t, server, closed);
+  return { browser, issueCredential, origin: launchUrl.origin };
+}
+
+async function prepareShortcut(temporary, env) {
+  const packageRoot = join(temporary, 'SiMetropolis Edu');
+  await cp(new URL('classroom/', root), join(packageRoot, 'classroom'), {
+    recursive: true,
+    filter: (path) => !['.data', '.DS_Store', '__pycache__'].includes(basename(path)),
+  });
+  const script = join(packageRoot, nativeShortcut);
+  await cp(new URL(nativeShortcut, root), script);
+  const setup = { cwd: packageRoot, env };
+  execFileSync(python, ['-I', '-m', 'venv', '.venv'], setup);
+  const interpreter = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+  execFileSync(join(packageRoot, '.venv', interpreter),
+    ['-I', '-m', 'pip', '--disable-pip-version-check', 'install', '-r', 'classroom/requirements.txt'], setup);
+  return script;
+}
+
+async function launchClassroom(t, { shortcut = false, browser, delayedProfile = false } = {}) {
+  const temporary = await mkdtemp(join(tmpdir(), 'long-valley-launch-'));
+  let launcher;
+  let closed;
+  t.after(async () => {
+    if (launcher?.pid && launcher.exitCode === null && launcher.signalCode === null) {
+      if (shortcut && process.platform === 'win32') {
+        const stop = spawn('taskkill.exe', ['/pid', String(launcher.pid), '/t', '/f'], { stdio: 'ignore' });
+        await once(stop, 'close');
+      } else {
+        launcher.kill();
+      }
+    }
+    await closed?.catch(() => {});
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const browserCommand = join(temporary, 'open-browser.mjs');
+  // A foreground opener waits for the page before returning control to the launcher.
+  await writeFile(browserCommand, `
+const url = new URL(process.argv[2]);
+try {
+  const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  console.log(url.href);
+} catch (error) {
+  // Fail the fixture's URL check without invoking a fallback desktop browser.
+  console.log('Classroom did not answer the foreground browser: ' + error.message);
+}
+`);
+  const browserOverride = [process.execPath, browserCommand].map((path) => `"${path.replaceAll('\\', '/')}"`);
+  const options = {
+    cwd: root, stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, TMPDIR: temporary, TEMP: temporary, BROWSER: `${browserOverride.join(' ')} %s` },
+  };
+  let command = python;
+  let args = ['-B', '-m', 'classroom', 'launch'];
+  if (shortcut) {
+    options.env.PYTHONPATH = '';
+    const script = await prepareShortcut(temporary, options.env);
+    options.cwd = temporary;
+    if (process.platform === 'win32') {
+      command = 'cmd.exe';
+      args = ['/d', '/s', '/c', `""${script}""`];
+      options.windowsVerbatimArguments = true;
+    } else {
+      command = script;
+      args = [];
+    }
+  } else if (delayedProfile) {
+    args = ['-B', '-c', `
+from unittest.mock import patch
+from classroom.__main__ import main
+
+# Issue the first ticket at time zero; the profile opens 121 seconds later.
+clock = iter([0])
+with patch('classroom.server.monotonic', new=lambda: next(clock, 121)):
+    main()
+`, 'launch'];
+  }
+  launcher = spawn(command, args, options);
+  closed = once(launcher, 'close');
+  return openClassroomBrowser(t, launcher, closed, browser);
 }
 
 async function openClass(page, origin, credential, language = 'English') {
@@ -101,19 +188,34 @@ async function readQr(projector) {
   return result.data;
 }
 
-test('a connected English class projects a LAN link that a group can use', lanTest, async (t) => {
-  const { browser, issueCredential, origin } = await startClassroom(t);
-  const teacher = await participant(browser);
-  await prepareClass(teacher, origin, issueCredential());
-  assert.equal(await teacher.getByRole('link', { name: 'Project join information' }).count(), 0);
+async function startConnectedClass(teacher, launchUrl, language) {
+  await teacher.goto(launchUrl.href);
+  await teacher.waitForURL(`${launchUrl.origin}/teacher`);
   await teacher.reload();
-  await teacher.getByRole('button', { name: 'Start class' }).click();
-  await teacher.getByRole('heading', { name: 'Your class is open' }).waitFor();
-  assert.equal(await teacher.getByRole('timer', { name: 'Time remaining' }).textContent(), '45:00');
+  const start = teacher.getByRole('button', { name: 'Start class' });
+  await start.waitFor();
+  assert.equal(await teacher.getByRole('timer').count(), 0);
+  assert.equal(await teacher.getByRole('link', { name: 'Project join information' }).count(), 0);
   assert.equal(await teacher.getByRole('alert').count(), 0);
-  assert.equal(await teacher.getByText('Open network settings', { exact: true }).count(), 0);
+  await teacher.getByLabel('Starting language').selectOption({ label: language });
+  const started = performance.now();
+  await start.click();
+  const timer = teacher.getByRole('timer', { name: /Time remaining|剩餘時間/ });
+  const [minutes, seconds] = (await timer.textContent()).split(':').map(Number);
+  const remaining = (minutes * 60 + seconds) * 1000;
+  assert.ok(remaining <= 45 * 60000 && remaining >= 45 * 60000 - (performance.now() - started),
+    'The default deadline should be 45 minutes from Start class');
+  assert.equal(await teacher.getByRole('alert').count(), 0);
+  assert.equal(await teacher.getByText(/Open network settings|開啟網絡設定/).count(), 0);
+}
 
+test('a connected English class projects a LAN link that a group can use', lanTest, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t, { shortcut: Boolean(nativeShortcut) });
+  const teacher = await participant(browser);
+  await startConnectedClass(teacher, launchUrl, 'English');
   const projector = await openProjection(teacher);
+  const bookmark = await teacher.request.get(projector.url() + '/');
+  assert.equal(bookmark.status(), 200);
   const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
   assert.ok(lanAddresses.includes(new URL(joinUrl).hostname), 'The projection must use a LAN address');
   const group = await participant(browser);
@@ -123,19 +225,16 @@ test('a connected English class projects a LAN link that a group can use', lanTe
 });
 
 test('a connected Traditional Chinese class admits groups by QR and short code and keeps the projection private', lanTest, async (t) => {
-  const { browser, issueCredential, origin } = await startClassroom(t);
+  const { browser, launchUrl } = await launchClassroom(t);
   const teacher = await participant(browser);
-  const credential = issueCredential();
-  await openClass(teacher, origin, credential, '繁體中文');
-  assert.equal(await teacher.getByRole('alert').count(), 0);
-  assert.equal(await teacher.getByText('開啟網絡設定', { exact: true }).count(), 0);
+  await startConnectedClass(teacher, launchUrl, '繁體中文');
 
   const projector = await openProjection(teacher);
   const joinUrl = await readQr(projector);
   const lanOrigin = new URL(joinUrl).origin;
   assert.ok(lanAddresses.includes(new URL(joinUrl).hostname), 'The QR must use a LAN address');
   assert.equal(joinUrl, await projector.getByRole('link', { name: /\/join\// }).getAttribute('href'));
-  assert.ok(!joinUrl.includes(credential));
+  assert.ok(!joinUrl.includes(launchUrl.hash.slice(1)), 'The QR must contain only the student URL');
   const groupA = await participant(browser);
   await groupA.goto(joinUrl);
   await groupA.getByRole('button', { name: '選擇場地 A' }).click();
@@ -152,8 +251,9 @@ test('a connected Traditional Chinese class admits groups by QR and short code a
   await groupB.getByRole('button', { name: '選擇場地 B' }).click();
   await groupB.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
 
-  await groupB.goto(`${lanOrigin}/teacher?lang=zh-Hant`);
-  await groupB.getByRole('button', { name: '登入' }).waitFor();
+  const teacherPage = await groupB.goto(`${lanOrigin}/teacher?lang=zh-Hant`);
+  if (teacherPage.ok()) await groupB.getByRole('button', { name: '登入' }).waitFor();
+  else assert.ok([403, 404].includes(teacherPage.status()));
   assert.equal(await groupB.getByRole('button', { name: /開始課堂|結束課堂|交換場地/ }).count(), 0);
   const projectionPath = new URL(projector.url()).pathname;
   for (const path of [projectionPath, `${projectionPath}/qr.png`]) {
@@ -168,17 +268,139 @@ test('the teacher countdown starts on click and keeps its original deadline afte
   const timer = teacher.getByRole('timer', { name: '剩餘時間' });
   const project = teacher.getByRole('link', { name: '投影加入資訊' });
   assert.equal(await timer.count(), 0);
-  const started = performance.now();
-  await teacher.getByRole('button', { name: '開始課堂' }).click();
+  const [started] = await Promise.all([
+    teacher.waitForRequest(request => new URL(request.url()).pathname === '/teacher/start')
+      .then(() => performance.now()),
+    teacher.getByRole('button', { name: '開始課堂' }).click(),
+  ]);
   assert.equal(await timer.textContent(), '00:07');
   const projectionPath = await project.getAttribute('href');
   await teacher.waitForFunction(() => document.querySelector('[role="timer"]').textContent === '00:05');
   await teacher.reload();
   assert.match(await timer.textContent(), /^00:0[345]$/);
   assert.equal(await project.getAttribute('href'), projectionPath);
-  await teacher.getByRole('button', { name: '開始課堂' }).waitFor({ timeout: 9000 });
-  assert.ok(performance.now() - started >= 6900, 'The class should stay open for the original duration');
-  assert.equal((await teacher.request.get(new URL(projectionPath, origin).href)).status(), 410);
+  const statusUrl = new URL(projectionPath + '/status', origin).href;
+  await delay(Math.max(0, started + 6750 - performance.now()));
+  assert.equal((await teacher.request.get(statusUrl)).status(), 204, 'The original deadline is still ahead');
+  await delay(Math.max(0, started + 7500 - performance.now()));
+  assert.equal((await teacher.request.get(statusUrl)).status(), 410, 'Reload must not extend the original deadline');
+  await teacher.getByRole('button', { name: '開始課堂' }).waitFor({ timeout: 2500 });
+});
+
+test('the prepared launcher opens lesson preparation with only a loopback connection', { timeout: 30000 }, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t);
+  assert.equal(launchUrl.hostname, '127.0.0.1');
+  const teacher = await participant(browser);
+  await teacher.route('**/*', (route) => new URL(route.request().url()).origin === launchUrl.origin
+    ? route.continue() : route.abort());
+  await teacher.goto(launchUrl.href);
+  await teacher.waitForURL(`${launchUrl.origin}/teacher`);
+  await teacher.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor();
+  const language = teacher.getByLabel('Starting language');
+  assert.equal(await language.inputValue(), 'en');
+  await language.selectOption({ label: '繁體中文' });
+  assert.equal(await language.inputValue(), 'zh-Hant');
+  assert.equal(await teacher.getByRole('link', { name: 'Project join information' }).count(), 0);
+  await teacher.getByRole('button', { name: 'Start class' }).click();
+  await teacher.getByRole('heading', { name: '課堂已開啟' }).waitFor();
+});
+
+test('Open SiMetropolis Edu runs from a prepared folder with spaces', {
+  skip: !nativeShortcut,
+  timeout: 30000,
+}, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t, { shortcut: true });
+  const teacher = await participant(browser);
+  await teacher.goto(launchUrl.href);
+  await teacher.getByRole('button', { name: 'Start class' }).waitFor();
+});
+
+test('a slow browser profile selection opens a fresh private teacher tab', { timeout: 30000 }, async (t) => {
+  const { browser, launchUrl, nextLaunchUrl } = await launchClassroom(t, { delayedProfile: true });
+  const delayedTab = await participant(browser);
+  const [renewedUrl] = await Promise.all([nextLaunchUrl(), delayedTab.goto(launchUrl.href)]);
+  await delayedTab.getByText('Your sign-in link expired. Continue in the new teacher tab.').waitFor();
+  await delayedTab.goto(`${launchUrl.origin}/teacher`);
+  await delayedTab.getByLabel('Teacher credential').waitFor();
+  await delayedTab.goto(launchUrl.href);
+  await delayedTab.getByRole('alert').getByText('Open SiMetropolis Edu again to reach the teacher view.').waitFor();
+
+  assert.equal(renewedUrl.origin, launchUrl.origin);
+  assert.ok(renewedUrl.hash && renewedUrl.hash !== launchUrl.hash, 'The launcher must issue a fresh ticket');
+  const newTab = await participant(browser);
+  await newTab.goto(renewedUrl.href);
+  await newTab.getByRole('button', { name: 'Start class' }).waitFor();
+});
+
+test('a group browser cannot reuse the launcher sign-in or open the teacher projection', { timeout: 30000 }, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t);
+  const teacher = await participant(browser);
+  const group = await participant(browser);
+  const teacherView = `${launchUrl.origin}/teacher`;
+
+  await group.goto(teacherView);
+  await group.getByLabel('Teacher credential').waitFor();
+  assert.equal(await group.getByRole('button', { name: 'Start class' }).count(), 0);
+
+  await teacher.goto(launchUrl.href);
+  await teacher.waitForURL(teacherView);
+  await teacher.getByRole('button', { name: 'Start class' }).click();
+  await teacher.getByRole('heading', { name: 'Your class is open' }).waitFor();
+
+  await group.goto(launchUrl.href);
+  await group.getByRole('alert').getByText('Open SiMetropolis Edu again to reach the teacher view.').waitFor();
+  assert.equal(new URL(group.url()).hash, '');
+  const code = await teacher.getByRole('button', { name: 'End class' }).getAttribute('value');
+  for (const path of [`/teacher/project/${code}`, `/teacher/project/${code}/qr.png`]) {
+    assert.equal((await group.request.get(launchUrl.origin + path)).status(), 403);
+  }
+  const project = teacher.getByRole('link', { name: 'Project join information' });
+  if (await project.count()) {
+    const projector = await openProjection(teacher);
+    const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+    const address = new URL(joinUrl);
+    assert.ok(lanAddresses.includes(address.hostname));
+    assert.equal(joinUrl, `${address.origin}/join/${code}?lang=en`);
+    assert.equal(await readQr(projector), joinUrl);
+    assert.ok(!(await projector.content()).includes(launchUrl.hash.slice(1)), 'Projection exposed the sign-in ticket');
+    await group.goto(joinUrl);
+    await group.getByRole('heading', { name: 'Choose your starting site' }).waitFor();
+  }
+});
+
+test('a second launcher preserves the first teacher session in the same browser', { timeout: 30000 }, async (t) => {
+  const first = await launchClassroom(t);
+  const teacher = await participant(first.browser);
+  await teacher.goto(first.launchUrl.href);
+  await teacher.getByRole('button', { name: 'Start class' }).click();
+  const endClass = teacher.getByRole('button', { name: 'End class' });
+  const originalClass = await endClass.getAttribute('value');
+
+  const second = await launchClassroom(t, { browser: first.browser });
+  if (await teacher.getByRole('link', { name: 'Project join information' }).count()) {
+    const projector = await openProjection(teacher);
+    const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+    const studentEntry = new URL(second.launchUrl);
+    studentEntry.hostname = new URL(joinUrl).hostname;
+    const group = await participant(first.browser);
+    const response = await group.goto(studentEntry.href);
+    if (response.ok()) await group.getByRole('alert').waitFor();
+    else assert.ok([403, 404].includes(response.status()));
+    assert.equal(await group.getByRole('button', { name: 'Start class' }).count(), 0);
+  }
+  const secondTab = await teacher.context().newPage();
+  await secondTab.goto(second.launchUrl.href);
+  const signOut = secondTab.getByRole('button', { name: 'Sign out' });
+  await signOut.waitFor();
+  await teacher.reload();
+  assert.equal(await endClass.getAttribute('value'), originalClass);
+
+  await signOut.click();
+  await secondTab.getByLabel('Teacher credential').waitFor();
+  await teacher.reload();
+  assert.equal(await endClass.getAttribute('value'), originalClass);
+  await teacher.getByRole('button', { name: 'End class' }).click();
+  await teacher.getByRole('button', { name: 'Start class' }).waitFor();
 });
 
 test('only the class owner can open the projection and load its QR image', { timeout: 30000 }, async (t) => {

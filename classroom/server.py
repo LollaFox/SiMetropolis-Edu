@@ -6,16 +6,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from ipaddress import IPv4Address
 from pathlib import Path
-from socket import AF_INET, SOCK_DGRAM, socket
+import secrets
+from threading import Thread
 from time import monotonic
 from typing import Union
 from urllib.parse import parse_qs
+import webbrowser
 
 import qrcode
 from qrcode.image.pure import PyPNGImage
 
 from . import views
 from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
+from .network import ClassroomLan, format_origin
 from .state import Classroom, ClassSession
 
 
@@ -24,6 +27,7 @@ SWAP_WAIT_SECONDS = 15
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
+    "/teacher-launch.js": ("teacher-launch.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -36,23 +40,34 @@ class Response:
     cache_control: str = "no-store"
 
 
+class ExpiredLaunchTicket(Exception):
+    """The pending sign-in link reached the browser after its deadline."""
+
+
+class TeacherLaunch:
+    def __init__(self, credential):
+        self._credential = credential
+        self.renew()
+
+    def renew(self):
+        self.ticket = secrets.token_urlsafe(32)
+        self._expires_at = monotonic() + 120
+
+    def is_pending(self, ticket):
+        return self._credential is not None and secrets.compare_digest(self.ticket.encode(), ticket.encode())
+
+    def redeem(self, ticket):
+        if not self.is_pending(ticket):
+            return None
+        if monotonic() >= self._expires_at:
+            raise ExpiredLaunchTicket
+        credential = self._credential
+        self._credential = None
+        return credential
+
+
 def student_join_path(session, *, language=None):
     return f"/join/{session.code}?lang={language or session.language}"
-
-
-def local_join_origin(port):
-    # Ask the OS for the route's source address without sending any traffic.
-    # The link-local multicast route can also work without a default gateway.
-    for destination in ("192.0.2.1", "224.0.0.1"):
-        try:
-            with socket(AF_INET, SOCK_DGRAM) as route:
-                route.connect((destination, 9))
-                address = IPv4Address(route.getsockname()[0])
-        except OSError:
-            continue
-        if not (address.is_loopback or address.is_unspecified or address.is_multicast):
-            return f"http://{address}:{port}"
-    return None
 
 
 def group_assignment(group):
@@ -92,19 +107,37 @@ class Handler(BaseHTTPRequestHandler):
             return ""
 
     def teacher_id(self):
-        return self.classroom.teacher_for_session(self.cookie_value("teacher_session"))
+        return self.classroom.teacher_for_session(self.cookie_value(self.server.teacher_cookie_name))
 
-    def join_origin(self):
-        if self.server.automatic_network:
-            return local_join_origin(self.server.server_port)
-        return self.server.origin
+    def join_origin_for_page(self, path):
+        if self.server.lan is None:
+            return self.server.origin
+        if path != "/teacher" and not path.startswith("/teacher/project/"):
+            return None
+        with self.classroom.lock:
+            teacher = self.teacher_id()
+            session = self.classroom.class_for_teacher(teacher) if teacher else None
+            if session is None:
+                return None
+            projection = f"/teacher/project/{session.code}"
+            if path not in ("/teacher", projection, projection + "/", projection + "/qr.png"):
+                return None
+        # Windows adapter discovery can take seconds. Groups can still act and
+        # classes can expire while the teacher waits. get_page rechecks ownership.
+        return self.server.lan.join_origin(refresh=path == "/teacher")
 
-    def accepts_form_origin(self):
-        origin = self.headers.get("Origin")
-        if not self.server.automatic_network:
-            return origin == self.server.origin
-        return (origin == f"http://{self.headers.get('Host')}"
-                and (origin == self.server.origin or origin == self.join_origin()))
+    def local_request_origin(self):
+        # Match the numeric address the browser reached, including on a multi-interface host.
+        address, port = self.connection.getsockname()
+        origin = format_origin("http", address, port)
+        if self.headers.get("Host") in (origin.removeprefix("http://"), f"{address}:{port}"):
+            return origin
+        return None
+
+    def is_local_teacher_launch(self):
+        return (self.server.teacher_launch is not None
+                and IPv4Address(self.client_address[0]).is_loopback
+                and self.local_request_origin() == self.server.origin)
 
     def owned_class(self, code, language) -> Union[ClassSession, Response]:
         teacher = self.teacher_id()
@@ -121,6 +154,12 @@ class Handler(BaseHTTPRequestHandler):
         secure = "; Secure" if self.server.origin.startswith("https://") else ""
         max_age = "; Max-Age=0" if clear else ""
         return f"{name}={value}; Path={path}; HttpOnly; SameSite=Strict{secure}{max_age}"
+
+    def sign_in_teacher(self, credential):
+        token = self.classroom.sign_in(credential) if credential else None
+        if token is None:
+            return None
+        return self.session_cookie(self.server.teacher_cookie_name, token, "/teacher")
 
     def redirect(self, path, cookie=None):
         headers = [("Location", path)]
@@ -153,8 +192,9 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 # A group can leave the page while the request is waiting for a swap.
                 return
+        join_origin = self.join_origin_for_page(path)
         with self.classroom.lock:
-            response = self.get_page(path, language, fields)
+            response = self.get_page(path, language, fields, join_origin)
         self.respond(response)
 
     def group_status(self, code, *, wait_for_swap):
@@ -167,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(403)
             if not wait_for_swap or session.swapped:
                 return group_assignment(group)
-            timeout = min(SWAP_WAIT_SECONDS, session.expires_at - monotonic())
+            timeout = min(SWAP_WAIT_SECONDS, session.remaining_seconds())
 
         session.swap_or_end.wait(timeout)
         with self.classroom.lock:
@@ -175,9 +215,11 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(410)
             return group_assignment(group)
 
-    def get_page(self, path, language, fields):
+    def get_page(self, path, language, fields, join_origin):
         if path == "/":
             return Response(200, views.home(language))
+        if path == "/teacher/launch" and self.is_local_teacher_launch():
+            return Response(200, views.teacher_launch(language))
         if path == "/teacher":
             teacher = self.teacher_id()
             if teacher is None:
@@ -187,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             if session is None:
                 return Response(200, views.teacher(language))
             return Response(200, views.teacher(
-                session.language, session, notice=notice, can_project=self.join_origin() is not None,
+                session.language, session, notice=notice, can_project=join_origin is not None,
             ))
         if path == "/join":
             if "code" not in fields:
@@ -224,10 +266,10 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(204, headers=(("X-Sites-Swapped", str(session.swapped).lower()),))
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
-            return self.teacher_projection(code, detail, language)
+            return self.teacher_projection(code, detail, language, join_origin)
         return Response(404, views.unavailable(language))
 
-    def teacher_projection(self, code, detail, language):
+    def teacher_projection(self, code, detail, language, join_origin):
         session = self.owned_class(code, language)
         if isinstance(session, Response):
             return session
@@ -243,10 +285,9 @@ class Handler(BaseHTTPRequestHandler):
             if comparison is not None:
                 return Response(200, views.comparison_projection(session, comparison))
         if detail in {"", "qr.png"}:
-            origin = self.join_origin()
-            if origin is None:
+            if join_origin is None:
                 return Response(503)
-            join_url = origin + student_join_path(session)
+            join_url = join_origin + student_join_path(session)
             if detail == "qr.png":
                 image = BytesIO()
                 qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
@@ -256,7 +297,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path, language, _ = self.request_target()
-        if not self.accepts_form_origin():
+        expected = self.local_request_origin() if self.server.lan is not None else self.server.origin
+        if expected is None or self.headers.get("Origin") != expected:
             return self.respond(Response(403))
         size = self.headers.get("Content-Length", "")
         if not size.isascii() or not size.isdecimal() or len(size) > 4:
@@ -267,15 +309,27 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(response)
 
     def post_page(self, path, language, fields):
+        if path == "/teacher/launch" and self.is_local_teacher_launch():
+            launch = self.server.teacher_launch
+            try:
+                credential = launch.redeem(fields.get("ticket", [""])[0])
+            except ExpiredLaunchTicket:
+                # Only the local browser opener receives the replacement link.
+                launch.renew()
+                open_teacher_browser(self.server)
+                return Response(202)
+            cookie = self.sign_in_teacher(credential)
+            if cookie is None:
+                return Response(403)
+            return Response(204, headers=(("Set-Cookie", cookie),))
         if path == "/teacher/sign-in":
-            token = self.classroom.sign_in(fields.get("credential", [""])[0].strip())
-            if token is None:
+            cookie = self.sign_in_teacher(fields.get("credential", [""])[0].strip())
+            if cookie is None:
                 return Response(401, views.sign_in(language, invalid=True))
-            cookie = self.session_cookie("teacher_session", token, "/teacher")
             return self.redirect(f"/teacher?lang={language}", cookie)
         if path == "/teacher/sign-out":
-            self.classroom.sign_out(self.cookie_value("teacher_session"))
-            cookie = self.session_cookie("teacher_session", "", "/teacher", clear=True)
+            self.classroom.sign_out(self.cookie_value(self.server.teacher_cookie_name))
+            cookie = self.session_cookie(self.server.teacher_cookie_name, "", "/teacher", clear=True)
             return self.redirect(f"/teacher?lang={language}", cookie)
         if path == "/teacher/start":
             teacher = self.teacher_id()
@@ -379,15 +433,48 @@ class Handler(BaseHTTPRequestHandler):
         return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
 
 
-def run(host, port, public_url, duration_seconds, credentials):
+def open_teacher_browser(server):
+    launch = server.teacher_launch
+    ticket = launch.ticket
+    # The browser fragment keeps the single-use ticket out of HTTP requests and referrers.
+    url = f"{server.origin}/teacher/launch#{ticket}"
+
+    def open_browser():
+        try:
+            if webbrowser.open_new_tab(url):
+                return
+        except Exception:
+            pass
+        with server.classroom.lock:
+            # A foreground opener can report failure after sign-in or renewal.
+            if not launch.is_pending(ticket):
+                return
+            server.browser_open_failed = True
+        server.shutdown()
+
+    # Foreground browser commands may wait for the page or even for the browser to exit.
+    Thread(target=open_browser, daemon=True).start()
+
+
+def run(host, port, public_url, duration_seconds, credentials, *, launch_teacher=False):
     automatic_network = host is None and public_url is None
     bind_host = host or ("0.0.0.0" if automatic_network else "127.0.0.1")
     with ThreadingHTTPServer((bind_host, port), Handler) as server:
         server.classroom = Classroom(credentials, duration_seconds)
-        server.origin = public_url or f"http://127.0.0.1:{server.server_port}"
-        server.automatic_network = automatic_network
-        print(server.origin, flush=True)
+        server.origin = public_url or format_origin("http", "127.0.0.1", server.server_port)
+        server.lan = ClassroomLan(server.server_port) if automatic_network else None
+        # Browsers share cookies across ports, even when two launchers run separate classrooms.
+        server.teacher_cookie_name = f"teacher_session_{server.server_port}" if launch_teacher else "teacher_session"
+        server.teacher_launch = None
+        server.browser_open_failed = False
+        if launch_teacher:
+            server.teacher_launch = TeacherLaunch(credentials.issue())
+            open_teacher_browser(server)
+        else:
+            print(server.origin, flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            pass
+            return
+        if server.browser_open_failed:
+            raise SystemExit("SiMetropolis Edu couldn't open your default browser.")

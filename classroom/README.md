@@ -1,6 +1,30 @@
 # Long Valley classroom
 
-Run these commands from the repository root with Python 3.9 or newer.
+On a prepared computer, double-click **Open SiMetropolis Edu** (`.command` on Mac, `.cmd` on Windows). The default browser opens lesson preparation, including when the computer is disconnected. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
+
+If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
+
+### Prepare a local checkout
+
+The shortcuts use a Python 3.9 or newer virtual environment named `.venv` beside the launchers. To prepare a checkout for testing, run the commands for your platform from the repository root.
+
+Mac:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r classroom/requirements.txt
+```
+
+Windows:
+
+```bat
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r classroom\requirements.txt
+```
+
+### Manual server setup
+
+To run the server and sign in manually, use these commands from the repository root with Python 3.9 or newer.
 
 ```sh
 python3 -m venv /tmp/long-valley-venv
@@ -26,7 +50,7 @@ The 45-minute countdown starts when you select **Start class**. **End class** cl
 
 ## Group devices
 
-Use the default `serve` command on the classroom network. The teacher view stays at `127.0.0.1:8899`. The server listens on local IPv4 interfaces and uses the computer’s active route to choose the projected address. Group devices need a network that allows them to reach the teacher’s computer.
+The shortcut and the default `serve` command listen on local IPv4 interfaces. The launcher opens the private teacher view on the teacher’s computer. The projection uses a connected Wi-Fi or Ethernet address so groups on the same network can join. The classroom network must allow connections between devices.
 
 For testing on one device, use `serve --host 127.0.0.1`. To specify a fixed address, use `--host` and `--public-url` together, then open the teacher view through the public URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
 
@@ -42,7 +66,11 @@ Install Playwright and jsQR in an external test directory. Set `PLAYWRIGHT_PATH`
 node --test tools/check_long_valley.mjs
 ```
 
-The tests use independent browser contexts for teachers and groups. The connected-class tests exercise the default server through its LAN address when the test computer has a connected IPv4 interface. The remaining tests use an isolated loopback classroom. They verify projection privacy, QR and short-code entry, both languages, the teacher countdown, expiry, manual ending, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
+The connected-class tests start the prepared launcher and use separate browser sessions on the same computer to join through its LAN address. They cover both opening languages, all three join methods and teacher ownership. The timer test checks that reloading the teacher view preserves the original deadline. Run `python -B -m unittest discover -s tests -p test_classroom_network.py` for adapter-selection checks.
+
+To verify a classroom network, open the shortcut on the teacher’s computer and join from a second device on the same Wi-Fi or Ethernet. In an English class, follow the projected link and choose Site A. Start another class in 繁體中文, scan the QR and choose 場地 A, then use a fresh browser session on the student device to enter the short code and choose 場地 B.
+
+The launcher checks open the default-browser URL in Chromium with loopback access, exercise language selection before the teacher starts class, and verify that a second browser cannot reuse the private sign-in link. The shortcut check installs `classroom/requirements.txt` into a temporary package's own virtual environment, then runs the local platform's launcher from a folder with spaces in its name. For an offline test run, download the wheels beforehand with `python -m pip download -r classroom/requirements.txt -d wheels`. Set `PIP_NO_INDEX=1` and `PIP_FIND_LINKS` to the absolute path of that wheels directory when running the tests.
 
 The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
 
