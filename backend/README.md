@@ -1,12 +1,12 @@
-> **Integrated workspace update · 2026-10-16:** this project now serves the original `sandbox/web` on **8893** via `python3 -B start_integrated.py`. The saved-city UI defaults to the first saved simulation month, supports previous/next and saved-history playback, has canonical object/date details, resumable polling and explicit unavailable metrics. The release text below describes the upstream layout/UI and its 8877/8878/8879 examples; paths beginning `frontend/sandbox/` are `sandbox/` here. PDF/tag/script limitations and backend numerical behavior are unchanged. Start with the [current integration guide](../docs/前后端合并说明_2026-10-16.md). DeepSeek was not enabled in this merge.
+# Narrative city sandbox backend
 
-# Narrative city sandbox
+Backend development reference. For classroom downloads, see [SiMetropolis Edu](../README.md).
 
-For the **v0.1.0 internal release**, start with the root [README](../README.md). Enter the DeepSeek key in Configure; do not place it in a file. Teammate guides: [frontend API handoff (English)](docs/releases/FRONTEND_HANDOFF_EN.md) / [中文](docs/releases/FRONTEND_HANDOFF_ZH.md); [reading saved city history (English)](docs/releases/CITY_HISTORY_EN.md) / [中文](docs/releases/CITY_HISTORY_ZH.md).
+Teammate guides: [frontend API handoff (English)](docs/releases/FRONTEND_HANDOFF_EN.md) / [中文](docs/releases/FRONTEND_HANDOFF_ZH.md); [reading saved city history (English)](docs/releases/CITY_HISTORY_EN.md) / [中文](docs/releases/CITY_HISTORY_ZH.md).
 
 A working backend for the existing Northern Metropolis handoff frontend. The default offline demonstration completes 50 residential towers, 12 business towers, 10 parks and 4 stations. The frontend files are unchanged. All scenario values and social profiles are synthetic.
 
-## Open the sandbox
+## Run the backend locally
 
 From the handoff folder:
 
@@ -63,8 +63,6 @@ python3 -B -m backend.cli --output /private/tmp/nm-narrative-offline
 ```
 
 Choose a new output directory for each run. Outputs include monthly states, complete decision context/outcomes, narratives, events, provider-attempt metrics and a summary. New monthly files use lossless gzip plus shared structural records; [storage format and measurements](docs/STORAGE.md) explain the transparent reader and preserved legacy files. Server data lives under `backend/.data/` and is excluded from Git. `/api/v3/simulations/{simulationId}/export` provides fully hydrated canonical states, per-object tables and metrics; IDs are returned by simulation or available in `/api/state`.
-
-The product launcher does not read `api_key` or `backend/.data/credentials`. Enter the DeepSeek key in Configure.
 
 The pacing flags start five residential towers each month and finish each tower in the following month, completing all fifty by month 11. Change `--residential-starts-per-month`, `--construction-months`, and optional `--construction-interval-months` to vary the government schedule. Omitting all pacing flags preserves the original script. Month 1 of this paced scenario has residential construction sites and no completed residential occupancy.
 

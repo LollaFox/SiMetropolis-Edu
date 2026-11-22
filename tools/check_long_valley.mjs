@@ -69,10 +69,14 @@ async function classroom(t, ...options) {
   return { browser, issueCredential, origin: launchUrl.origin };
 }
 
-async function prepareShortcut(temporary, env) {
+async function prepareShortcut(temporary, env, shortcut) {
   let script;
   if (process.platform === 'win32') {
     script = await extractWindowsDownload(temporary);
+    if (shortcut === 'legacy') {
+      script = join(dirname(script), 'start-product.cmd');
+      await cp(new URL('start-product.cmd', root), script);
+    }
   } else {
     const folder = join(temporary, 'SiMetropolis Edu');
     await cp(new URL('classroom/', root), join(folder, 'classroom'), {
@@ -143,7 +147,7 @@ try {
   if (windowsScript || shortcut) {
     options.env.PYTHONPATH = '';
     options.cwd = temporary;
-    const script = windowsScript || await prepareShortcut(temporary, options.env);
+    const script = windowsScript || await prepareShortcut(temporary, options.env, shortcut);
     if (process.platform === 'darwin') {
       readOnlyClassroom = join(dirname(script), 'classroom');
       await chmod(readOnlyClassroom, 0o555);
@@ -672,6 +676,16 @@ test('Open SiMetropolis Edu runs from a prepared folder with spaces', {
   await teacher.getByRole('button', { name: 'Start class' }).waitFor();
 });
 
+test('the legacy Windows shortcut opens private lesson preparation', {
+  skip: process.platform !== 'win32',
+  timeout: 30000,
+}, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t, { shortcut: 'legacy' });
+  const teacher = await participant(browser);
+  await teacher.goto(launchUrl.href);
+  await teacher.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor();
+});
+
 test('the Windows download retries interrupted setup and reopens lesson preparation offline', {
   skip: process.platform !== 'win32'
     || (process.env.WINDOWS_DOWNLOAD_TEST !== '1' && 'Set WINDOWS_DOWNLOAD_TEST=1 for live first-use setup'),
@@ -679,7 +693,7 @@ test('the Windows download retries interrupted setup and reopens lesson preparat
 }, async (t) => {
   const temporary = await mkdtemp(join(tmpdir(), 'long-valley-windows-'));
   try {
-    const windowsScript = await extractWindowsDownload(temporary);
+    const windowsScript = await extractWindowsDownload(temporary, process.env.WINDOWS_DOWNLOAD_ZIP);
     const connection = await downloadConnection(t);
     const first = await launchClassroom(t, { windowsScript, env: connection.env, retryDownload: true });
     assert.ok(connection.interrupted, 'A required download was interrupted after receiving bytes');

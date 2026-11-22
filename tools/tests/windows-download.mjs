@@ -9,14 +9,17 @@ import { connect as connectTls } from 'node:tls';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-export async function extractWindowsDownload(temporary) {
+export async function extractWindowsDownload(temporary, zipPath) {
   const build = fileURLToPath(new URL('../build-windows-download.ps1', import.meta.url));
   const powershell = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
-  execFileSync('powershell.exe', [...powershell, '-File', build, '-OutputDirectory', temporary]);
+  if (!zipPath) {
+    execFileSync('powershell.exe', [...powershell, '-File', build, '-OutputDirectory', temporary]);
+    zipPath = join(temporary, 'SiMetropolis-Edu-Windows.zip');
+  }
   const folder = join(temporary, 'SiMetropolis Edu');
   execFileSync('powershell.exe', [...powershell, '-Command',
     'Expand-Archive -LiteralPath $env:TEST_ZIP -DestinationPath $env:TEST_FOLDER'], {
-    env: { ...process.env, TEST_ZIP: join(temporary, 'SiMetropolis-Edu-Windows.zip'), TEST_FOLDER: folder },
+    env: { ...process.env, TEST_ZIP: zipPath, TEST_FOLDER: folder },
   });
   const entries = await readdir(folder, { withFileTypes: true });
   const launchers = entries.filter(entry => entry.isFile() && /\.(cmd|bat|exe|lnk|ps1|url)$/i.test(entry.name));

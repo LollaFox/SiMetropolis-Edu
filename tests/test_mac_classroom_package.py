@@ -34,8 +34,12 @@ class MacClassroomPackageTests(unittest.TestCase):
         temporary = TemporaryDirectory(prefix="mac-classroom-package-")
         cls.addClassCleanup(temporary.cleanup)
         folder = Path(temporary.name)
-        cls.archive = folder / "SiMetropolis-Edu-Mac.zip"
-        subprocess.run([sys.executable, ROOT / "tools/build_mac_classroom.py", cls.archive], check=True)
+        supplied_zip = os.environ.get("SIMETROPOLIS_MAC_TEST_ZIP")
+        if supplied_zip:
+            cls.archive = Path(supplied_zip).resolve()
+        else:
+            cls.archive = folder / "SiMetropolis-Edu-Mac.zip"
+            subprocess.run([sys.executable, ROOT / "tools/build_mac_classroom.py", cls.archive], check=True)
         if RUNTIME_ARCHIVE:
             cls.driver = folder / "classroom-test-driver"
             subprocess.run(["/usr/bin/xcrun", "swiftc", "-module-cache-path", folder / "swift-cache",

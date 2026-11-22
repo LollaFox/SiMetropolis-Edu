@@ -1,20 +1,8 @@
 # Northern Metropolis — sandbox 2.0
 
+Simulator source reference. For classroom downloads, see [SiMetropolis Edu](../README.md).
+
 A local 3D city game inspired by the Northern Metropolis. Housing, employment, construction, transport, energy and air quality change as the simulation runs. You can intervene, rewind, and branch to explore another future. The primary `sandbox/` directory contains v2. Original v1 remains under `sandbox_v1/`, and the relative `sandbox_v2 -> sandbox` symlink preserves older v2 commands.
-
-## Run
-
-From the repository root:
-
-```sh
-python3 sandbox/server.py --port 8877
-# Equivalent package command:
-python3 -m sandbox.server --port 8877
-```
-
-The direct script also works from another directory when supplied its absolute path. The compatibility command `python3 -m sandbox_v2.server --port 8877` still works from the repository root.
-
-Open http://127.0.0.1:8877 . Python 3.9 or newer is sufficient. No package installation, frontend build, external map tiles or CDN is required. Three.js 0.180.0 is vendored with its MIT notice. A browser with WebGL2 is needed for the 3D view.
 
 Choose a district lens—Hung Shui Kiu, San Tin, Kwu Tung or Ta Kwu Ling—to explore the regional scene. **Enter the city** switches to street level: drag to look, use WASD or the arrow keys to move, and select a development to inspect it. **Regional view** returns above the city. Day/dusk changes lighting only; it does not change simulation time. Objectives, society activity and model information are accessible from the header.
 
@@ -61,6 +49,6 @@ The explicit paid smoke script `tests/live_smoke.py` is excluded from test disco
 
 Wibe 1.2 composes and pins the project contract, then tracks the manual implementation task, test evidence, independent review and browser integration. Root owns the plan; separately assigned agents implement the model and UI. Wibe's one-active-task-per-repository restriction means parallel implementation is coordinated inside a single Wibe task with disjoint file ownership. Manual CLI review records are lead attestations backed by the independent reviewer output, not authenticated automated-review records.
 
-The original test flight began at `05e03ee` on `codex/sandbox-v2`. The subsequent folder replacement starts from reviewed revision `3142a8a` on `codex/sandbox-folder-v2`. Historical evidence in `evidence/` retains the paths used during those reviews. Original v1 source and exports are preserved under `sandbox_v1/`; run `python3 sandbox_v1/server.py --port 8765` to open v1. Current v2 saves and captures live under ignored `sandbox/.data/` and `sandbox/.artifacts/`; the compatibility symlink reaches those same directories.
+The original test flight began at `05e03ee` on `codex/sandbox-v2`. The subsequent folder replacement starts from reviewed revision `3142a8a` on `codex/sandbox-folder-v2`. Historical evidence in `evidence/` retains the paths used during those reviews. Original v1 source and exports are preserved under `sandbox_v1/`. Current v2 saves and captures live under ignored `sandbox/.data/` and `sandbox/.artifacts/`; the compatibility symlink reaches those same directories.
 
 Original software in this repository is covered by the [SiMetropolis Decision Sandbox Restricted License](../LICENSE). Use is permitted only to members of the SiMetropolis team in the Inter-University GenAI Hackathon for SDGs and to that competition's judges. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency provenance. The vendored Three.js files remain under their own MIT notice.
