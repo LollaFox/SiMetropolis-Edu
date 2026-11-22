@@ -10,3 +10,4 @@ sandbox/.data/
 __pycache__/
 
 /runtime/
+/dist/

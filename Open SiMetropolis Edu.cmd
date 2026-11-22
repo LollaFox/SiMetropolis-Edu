@@ -1,12 +1,7 @@
 @echo off
 setlocal DisableDelayedExpansion
 cd /d "%~dp0" || exit /b 1
-if not exist ".venv\Scripts\python.exe" (
-    echo This copy of SiMetropolis Edu still needs to be set up.
-    pause
-    exit /b 1
-)
-".venv\Scripts\python.exe" -B -m classroom launch
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\launch-classroom-windows.ps1"
 if errorlevel 1 (
     pause
     exit /b 1
