@@ -37,7 +37,9 @@ def package_app(app, archive, signing_identity, notary_profile):
         run("/usr/bin/ditto", "-c", "-k", "--keepParent", app, archive)
         extraction = archive.parent / "verify"
         run("/usr/bin/ditto", "-x", "-k", archive, extraction)
-        run("/usr/bin/xcrun", "stapler", "validate", extraction / app.name)
+        app = extraction / app.name
+        run("/usr/bin/xcrun", "stapler", "validate", app)
+        run("/usr/sbin/spctl", "--assess", "--type", "execute", app)
     run("/usr/bin/codesign", "--verify", "--strict", app)
 
 
@@ -71,7 +73,7 @@ def build(output, signing_identity, notary_profile):
         shutil.copy2(MAC / "runtime.json", resources)
         run(sys.executable, "-m", "pip", "--disable-pip-version-check", "--no-cache-dir", "install",
             "--only-binary=:all:", "--require-hashes", "--no-compile", "--target", lesson,
-            "-r", MAC / "wheels.txt")
+            "-r", MAC / "wheels.txt", "-r", lesson / "classroom/requirements.txt")
         shutil.rmtree(lesson / "bin", ignore_errors=True)
 
         for architecture in ARCHITECTURES:

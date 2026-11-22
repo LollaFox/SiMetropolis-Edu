@@ -26,7 +26,6 @@ private struct Runtime: Decodable {
         guard digest == sha256 else { throw SetupError.incompleteDownload }
 
         let files = FileManager.default
-        // Publish only a complete runtime. A retry never launches an interrupted extraction.
         let staging = destination.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
         try files.createDirectory(at: staging, withIntermediateDirectories: false)
         defer { try? files.removeItem(at: staging) }
@@ -41,8 +40,9 @@ private struct Runtime: Decodable {
         do {
             try files.moveItem(at: staging, to: destination)
         } catch {
-            // Another copy may have finished installing the same runtime while this one downloaded.
-            guard files.isExecutableFile(atPath: Self.python(in: destination).path) else { throw error }
+            if files.isExecutableFile(atPath: Self.python(in: destination).path) { return }
+            guard files.fileExists(atPath: destination.path) else { throw error }
+            _ = try files.replaceItemAt(destination, withItemAt: staging)
         }
     }
 
@@ -74,6 +74,7 @@ private final class Launcher: NSObject, NSApplicationDelegate {
     private var classroom: Process?
     private var download: URLSessionDownloadTask?
     private var progressTimer: Timer?
+    private var quitAfterSetup = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
@@ -116,8 +117,14 @@ private final class Launcher: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let download else { return .terminateNow }
+        quitAfterSetup = true
+        download.cancel()
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        download?.cancel()
         if let classroom, classroom.isRunning { classroom.interrupt() }
     }
 
@@ -144,11 +151,9 @@ private final class Launcher: NSObject, NSApplicationDelegate {
                                       attributes: [.posixPermissions: 0o700])
             let runtime = try Runtime.bundled(in: resources)
             let destination = support.appendingPathComponent("runtime-\(runtime.sha256)")
-            let python = Runtime.python(in: destination)
-            if files.isExecutableFile(atPath: python.path) {
-                try startClassroom(python: python, resources: resources)
+            if files.isExecutableFile(atPath: Runtime.python(in: destination).path) {
+                try startClassroom(runtimeAt: destination, resources: resources)
             } else {
-                if files.fileExists(atPath: destination.path) { try files.removeItem(at: destination) }
                 downloadRuntime(runtime, to: destination, resources: resources)
             }
         } catch {
@@ -187,9 +192,13 @@ private final class Launcher: NSObject, NSApplicationDelegate {
                 self.progressTimer?.invalidate()
                 self.progress.isHidden = true
                 self.progress.stopAnimation(nil)
+                if self.quitAfterSetup {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                    return
+                }
                 do {
                     try outcome.get()
-                    try self.startClassroom(python: Runtime.python(in: destination), resources: resources)
+                    try self.startClassroom(runtimeAt: destination, resources: resources)
                 } catch {
                     self.showFailure(error)
                 }
@@ -206,12 +215,11 @@ private final class Launcher: NSObject, NSApplicationDelegate {
         task.resume()
     }
 
-    private func startClassroom(python: URL, resources: URL) throws {
+    private func startClassroom(runtimeAt destination: URL, resources: URL) throws {
         let lesson = resources.appendingPathComponent("lesson")
         let process = Process()
-        process.executableURL = python
-        process.currentDirectoryURL = lesson
-        // Isolated Python ignores system and user site-packages. Load the lesson and its wheels from the app.
+        process.executableURL = Runtime.python(in: destination)
+        process.currentDirectoryURL = destination.deletingLastPathComponent()
         process.arguments = ["-I", "-B", "-c",
                              "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('classroom', run_name='__main__', alter_sys=True)",
                              lesson.path, "launch"]
