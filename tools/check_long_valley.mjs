@@ -479,6 +479,55 @@ test('a running class withdraws stale join information and projects the new addr
   await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
 });
 
+test('both joined groups recover their work through the new QR after a host address change', lanTest, async t => {
+  const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: '127.0.0.1' });
+  const teacher = await participant(browser);
+  await startConnectedClass(teacher, launchUrl, 'English');
+  const projector = await openProjection(teacher);
+  const original = new URL(await readQr(projector));
+  const students = [
+    { page: await participant(browser), site: 'A', alignment: 'north', partner: 'Site B: Riverside wetland' },
+    { page: await participant(browser), site: 'B', alignment: 'south', partner: '場地 A：中央濕地' },
+  ];
+  for (const { page, site, alignment } of students) {
+    await page.goto(original.href);
+    await page.getByRole('button', { name: `Choose Site ${site}` }).click();
+    await page.getByLabel('Railway alignment').selectOption(alignment);
+    await page.getByRole('button', { name: 'Save for swap' }).click();
+    await page.getByText('Crossing saved for Pass the City.').waitFor();
+  }
+  await students[1].page.getByRole('button', { name: '繁體中文' }).click();
+
+  await setNetworkAddress('');
+  await projector.getByRole('img', { name: 'Join QR code' }).waitFor({ state: 'hidden', timeout: 12000 });
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  await setNetworkAddress(lanAddresses[0]);
+  await projector.getByRole('img', { name: 'Join QR code' }).waitFor({ timeout: 12000 });
+  const restored = new URL(await readQr(projector));
+  assert.notEqual(restored.hostname, original.hostname);
+  assert.equal(restored.pathname + restored.search, original.pathname + original.search);
+
+  for (const { page, site, alignment, partner } of students) {
+    // Open the projected address with this group's original browser, whose cookie is on the old host.
+    await page.goto(restored.href);
+    assert.equal(await page.getByRole('button', { name: /Choose Site [AB]/, disabled: true }).count(), 2);
+    await teacher.getByText('Help a group rejoin', { exact: true }).click();
+    await teacher.getByLabel('Group’s starting site').selectOption(site);
+    await teacher.getByRole('button', { name: 'Get group rejoin code' }).click();
+    const rejoinCode = await teacher.locator('code').innerText();
+    await page.getByLabel('Group rejoin code', { exact: true }).fill(rejoinCode);
+    await page.getByRole('button', { name: 'Rejoin my group' }).click();
+    await page.getByRole('heading', { name: partner }).waitFor();
+    assert.equal(await page.getByLabel(/Railway alignment|鐵路走線/).inputValue(), alignment);
+    await page.reload();
+    await page.getByRole('heading', { name: partner }).waitFor();
+    await teacher.getByRole('link', { name: 'Back to teacher view' }).click();
+  }
+  await teacher.getByRole('button', { name: 'End class' }).click();
+  await students[1].page.goto(restored.href);
+  await students[1].page.getByRole('heading', { name: '這個課堂已結束' }).waitFor();
+});
+
 test('the projection retries a failed QR when the same address returns', { timeout: 30000 }, async (t) => {
   const address = '192.0.2.10';
   const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: address });
