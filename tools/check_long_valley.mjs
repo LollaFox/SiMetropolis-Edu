@@ -528,6 +528,42 @@ test('both joined groups recover their work through the new QR after a host addr
   await students[1].page.getByRole('heading', { name: '這個課堂已結束' }).waitFor();
 });
 
+test('a returning group can retry a one-use code while the other starting site is still free', { timeout: 30000 }, async t => {
+  const { groupAt, teacher, projector, joinUrl } = await startInvestigation(t, '繁體中文');
+  const group = await groupAt('A');
+  await teacher.getByText('協助小組重新加入', { exact: true }).click();
+  await teacher.getByLabel('小組的起始場地').selectOption('A');
+  await teacher.getByRole('button', { name: '取得小組重入碼' }).click();
+  const originalCode = await teacher.locator('code').innerText();
+  await teacher.reload();
+  assert.equal(await teacher.locator('code').innerText(), originalCode);
+
+  await group.context().clearCookies();
+  await group.goto(joinUrl);
+  assert.ok(await group.getByRole('button', { name: '選擇場地 B' }).isEnabled());
+  assert.ok(!(await group.content()).includes(originalCode));
+  assert.ok(!(await projector.content()).includes(originalCode));
+  const input = group.getByLabel('小組重入碼', { exact: true });
+  const rejoin = group.getByRole('button', { name: '返回我的小組' });
+  await input.fill(originalCode.toLowerCase().replaceAll('-', ''));
+  await rejoin.click();
+  await group.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+
+  // A second loss of browser storage needs the group's new code from the private teacher tab.
+  await group.context().clearCookies();
+  await group.goto(joinUrl);
+  await input.fill(originalCode);
+  await rejoin.click();
+  await group.getByRole('alert').getByText('請向老師核對小組重入碼，然後再試一次。').waitFor();
+  assert.ok(await group.getByRole('button', { name: '選擇場地 B' }).isEnabled());
+  await teacher.reload();
+  const nextCode = await teacher.locator('code').innerText();
+  assert.notEqual(nextCode, originalCode);
+  await input.fill(nextCode);
+  await rejoin.click();
+  await group.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+});
+
 test('the projection retries a failed QR when the same address returns', { timeout: 30000 }, async (t) => {
   const address = '192.0.2.10';
   const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: address });
