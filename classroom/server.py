@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from ipaddress import IPv4Address
 from pathlib import Path
+from socket import AF_INET, SOCK_DGRAM, socket
 from time import monotonic
 from typing import Union
 from urllib.parse import parse_qs
@@ -36,6 +38,21 @@ class Response:
 
 def student_join_path(session, *, language=None):
     return f"/join/{session.code}?lang={language or session.language}"
+
+
+def local_join_origin(port):
+    # Ask the OS for the route's source address without sending any traffic.
+    # The link-local multicast route can also work without a default gateway.
+    for destination in ("192.0.2.1", "224.0.0.1"):
+        try:
+            with socket(AF_INET, SOCK_DGRAM) as route:
+                route.connect((destination, 9))
+                address = IPv4Address(route.getsockname()[0])
+        except OSError:
+            continue
+        if not (address.is_loopback or address.is_unspecified or address.is_multicast):
+            return f"http://{address}:{port}"
+    return None
 
 
 def group_assignment(group):
@@ -76,6 +93,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def teacher_id(self):
         return self.classroom.teacher_for_session(self.cookie_value("teacher_session"))
+
+    def join_origin(self):
+        if self.server.automatic_network:
+            return local_join_origin(self.server.server_port)
+        return self.server.origin
+
+    def accepts_form_origin(self):
+        origin = self.headers.get("Origin")
+        if not self.server.automatic_network:
+            return origin == self.server.origin
+        return (origin == f"http://{self.headers.get('Host')}"
+                and (origin == self.server.origin or origin == self.join_origin()))
 
     def owned_class(self, code, language) -> Union[ClassSession, Response]:
         teacher = self.teacher_id()
@@ -155,7 +184,11 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(200, views.sign_in(language))
             session = self.classroom.class_for_teacher(teacher)
             notice = fields.get("notice", [""])[0]
-            return Response(200, views.teacher(session.language if session else language, session, notice=notice))
+            if session is None:
+                return Response(200, views.teacher(language))
+            return Response(200, views.teacher(
+                session.language, session, notice=notice, can_project=self.join_origin() is not None,
+            ))
         if path == "/join":
             if "code" not in fields:
                 return Response(200, views.find_class(language))
@@ -210,7 +243,10 @@ class Handler(BaseHTTPRequestHandler):
             if comparison is not None:
                 return Response(200, views.comparison_projection(session, comparison))
         if detail in {"", "qr.png"}:
-            join_url = self.server.origin + student_join_path(session)
+            origin = self.join_origin()
+            if origin is None:
+                return Response(503)
+            join_url = origin + student_join_path(session)
             if detail == "qr.png":
                 image = BytesIO()
                 qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
@@ -220,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path, language, _ = self.request_target()
-        if self.headers.get("Origin") != self.server.origin:
+        if not self.accepts_form_origin():
             return self.respond(Response(403))
         size = self.headers.get("Content-Length", "")
         if not size.isascii() or not size.isdecimal() or len(size) > 4:
@@ -344,9 +380,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run(host, port, public_url, duration_seconds, credentials):
-    with ThreadingHTTPServer((host, port), Handler) as server:
+    automatic_network = host is None and public_url is None
+    bind_host = host or ("0.0.0.0" if automatic_network else "127.0.0.1")
+    with ThreadingHTTPServer((bind_host, port), Handler) as server:
         server.classroom = Classroom(credentials, duration_seconds)
         server.origin = public_url or f"http://127.0.0.1:{server.server_port}"
+        server.automatic_network = automatic_network
         print(server.origin, flush=True)
         try:
             server.serve_forever()

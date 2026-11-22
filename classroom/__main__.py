@@ -30,7 +30,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("issue-teacher-credential", help="Print a new teacher credential")
     serve = commands.add_parser("serve", help="Serve the classroom")
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--host", help="Bind explicitly instead of discovering the classroom network")
     serve.add_argument("--port", type=int, default=8899)
     serve.add_argument("--public-url", type=origin, help="Origin that group devices use")
     serve.add_argument("--duration-seconds", type=int, default=45 * 60)
@@ -41,7 +41,7 @@ def main():
         return
     if not 0 <= args.port <= 65535 or args.duration_seconds < 1:
         serve.error("Use a port from 0 to 65535 and a positive class duration")
-    if args.host != "127.0.0.1" and args.public_url is None:
+    if args.host not in (None, "127.0.0.1") and args.public_url is None:
         serve.error("--public-url is required when serving other devices")
 
     from .server import run

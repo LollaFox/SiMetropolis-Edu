@@ -22,11 +22,13 @@ Each group can select **Save for swap** to keep the crossing it wants to try at 
 
 Connected group screens switch as soon as they receive the teacher’s swap. If a device loses its connection or resumes from the background while showing its starting site, it hides that map until the classroom confirms the current site.
 
-The class lasts 45 minutes by default. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
+The 45-minute countdown starts when you select **Start class**. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
 
 ## Group devices
 
-For devices on a trusted local network, bind to the teacher computer’s LAN address and use the same address in the public URL. Replace the example address with the teacher computer’s address, and open the teacher view through that URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
+Use the default `serve` command on the classroom network. The teacher view stays at `127.0.0.1:8899`. The server listens on local IPv4 interfaces and uses the computer’s active route to choose the projected address. Group devices need a network that allows them to reach the teacher’s computer.
+
+For testing on one device, use `serve --host 127.0.0.1`. To specify a fixed address, use `--host` and `--public-url` together, then open the teacher view through the public URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
 
 ```sh
 python -B -m classroom serve --host 192.168.1.10 --public-url http://192.168.1.10:8899
@@ -40,7 +42,7 @@ Install Playwright and jsQR in an external test directory. Set `PLAYWRIGHT_PATH`
 node --test tools/check_long_valley.mjs
 ```
 
-The tests launch an isolated loopback classroom and use independent browser contexts for teachers and groups. They verify that only the class teacher can load the projection and its QR image. They decode the QR, join both sites, and exercise both languages. They also check manual ending, expiry, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
+The tests use independent browser contexts for teachers and groups. The connected-class tests exercise the default server through its LAN address when the test computer has a connected IPv4 interface. The remaining tests use an isolated loopback classroom. They verify projection privacy, QR and short-code entry, both languages, the teacher countdown, expiry, manual ending, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
 
 The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
 
