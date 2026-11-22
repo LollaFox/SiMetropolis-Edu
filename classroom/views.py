@@ -3,7 +3,8 @@
 from html import escape
 from urllib.parse import quote
 
-from .investigation_views import crossing_investigation
+from .investigation import DEFAULT_SEASON
+from .investigation_views import crossing_investigation, opening_map, seasonal_maps
 from .localization import words
 from .state import CODE_LENGTH, SITES
 
@@ -38,8 +39,11 @@ COPY = {
     "occupied": ("A group has taken this site.", "已有小組選擇這個場地。"),
     "choose_again": ("That site has been taken. Check which site is available.", "這個場地已有小組選擇。請查看哪些場地仍可選擇。"),
     "puzzle": ("How would you get a railway across Long Valley?", "你會怎樣讓鐵路穿越塱原？"),
-    "puzzle_help": ("The two stations are fixed. Look at where the wetland lies between them. Where might you cross, and what would you want to find out first?",
-                    "兩個車站的位置已定。看看它們之間的濕地在哪裏。你會選擇從哪裏穿越？你最想先弄清楚甚麼？"),
+    "puzzle_help": ("The two stations are fixed. Before choosing where to cross, find out what uses the wetland at different times of year.",
+                    "兩個車站的位置已定。選擇走線前，先看看一年四季有哪些生物利用兩站之間的濕地。"),
+    "explore": ("Explore through the year", "探索濕地四季"),
+    "wetland_comparison": ("The wetland through the year", "濕地的四季"),
+    "back_to_puzzle": ("Back to the railway puzzle", "返回鐵路難題"),
     "imagined": ("Imagined Long Valley setting", "以塱原為背景的想像場地"),
     "A": ("Site A: Central wetland", "場地 A：中央濕地"),
     "B": ("Site B: Riverside wetland", "場地 B：河畔濕地"),
@@ -79,9 +83,9 @@ def language_link(path, language):
     return f'<a href="{path}?lang={alternate}" lang="{alternate}">{LANGUAGES[alternate]}</a>'
 
 
-def language_button(path, language):
+def language_button(path, language, *, form="crossing-design"):
     alternate = alternate_language(language)
-    return f"""<button class="language secondary" form="crossing-design" formaction="{path}?lang={language}"
+    return f"""<button class="language secondary" form="{form}" formaction="{path}?lang={language}"
   name="language" value="{alternate}" lang="{alternate}">{LANGUAGES[alternate]}</button>"""
 
 
@@ -225,6 +229,7 @@ def choose_site(session, taken=False):
 def group_opening(session, group, *, season, notice=""):
     language, site = group.language, group.site
     t = words(language, COPY)
+    query = group_view_query(language, season)
     return page(language, t["puzzle"], f"""
 <section class="panel">
   <div class="opening">
@@ -236,6 +241,38 @@ def group_opening(session, group, *, season, notice=""):
     <p class="site-note">{t["imagined"]}</p>
     <h2>{t[site]}</h2>
     <p>{t["site_" + site]}</p>
+    <a class="wetland-entry" href="/join/{session.code}?{query}&amp;explore=year" aria-labelledby="explore-wetland">
+      <span class="button" id="explore-wetland">{t["explore"]}</span>
+      {opening_map(site, language)}
+    </a>
     {crossing_investigation(session, group, season, notice)}
   </section>
 </section>""", layout="wide", session=session)
+
+
+def group_view_query(language, season):
+    query = f"lang={language}"
+    if season != DEFAULT_SEASON:
+        query += f"&amp;season={season}"
+    return query
+
+
+def wetland_comparison(session, group, *, season):
+    language, site = group.language, group.site
+    t = words(language, COPY)
+    join_path = f"/join/{session.code}"
+    query = group_view_query(language, season)
+    return page(language, t["wetland_comparison"], f"""
+<section class="panel wetland-overview">
+  <a href="{join_path}?{query}">{t["back_to_puzzle"]}</a>
+  <div class="opening">
+    <h1>{t["wetland_comparison"]}</h1>
+    {language_button(f"{join_path}/language", language, form="wetland-language")}
+    <p class="site-note">{t[site]} · {t["imagined"]}</p>
+  </div>
+  <form id="wetland-language" action="{join_path}/language?lang={language}" method="post" hidden>
+    <input type="hidden" name="explore" value="year">
+    <input type="hidden" name="season" value="{season}">
+  </form>
+  {seasonal_maps(site, language)}
+</section>""", layout="wide comparison-page", session=session)

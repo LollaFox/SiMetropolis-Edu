@@ -51,8 +51,8 @@ async function openClass(page, origin, credential, language = 'English') {
   await page.getByRole('button', { name: /Start class|開始課堂/ }).click();
 }
 
-async function participant(browser) {
-  const page = await browser.newPage();
+async function participant(browser, options) {
+  const page = await browser.newPage(options);
   page.setDefaultTimeout(5000);
   return page;
 }
@@ -205,6 +205,95 @@ test('the join link, scanned QR, and short code reach the paired sites before th
   assert.ok(await groupA.getByRole('button', { name: 'Choose Site A' }).isEnabled());
   assert.ok(await groupA.getByRole('button', { name: 'Choose Site B' }).isEnabled());
 });
+
+for (const locale of [
+  {
+    language: 'English', tag: 'en',
+    choose: 'Choose Site', puzzle: 'How would you get a railway across Long Valley?',
+    explore: 'Explore through the year', comparison: 'The wetland through the year',
+    alternate: '繁體中文', seasons: ['Spring', 'Summer', 'Autumn', 'Winter'],
+  },
+  {
+    language: '繁體中文', tag: 'zh-Hant',
+    choose: '選擇場地', puzzle: '你會怎樣讓鐵路穿越塱原？',
+    explore: '探索濕地四季', comparison: '濕地的四季',
+    alternate: 'English', seasons: ['春季', '夏季', '秋季', '冬季'],
+  },
+]) {
+  test(`both assigned sites open a four-season comparison on a tablet in ${locale.language}`, { timeout: 30000 }, async (t) => {
+    const { browser, issueCredential, origin } = await classroom(t);
+    const teacher = await participant(browser);
+    await openClass(teacher, origin, issueCredential(), locale.language);
+    const projector = await openProjection(teacher);
+    const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+
+    for (const site of ['A', 'B']) {
+      const viewport = site === 'A' ? { width: 820, height: 1180 } : { width: 1024, height: 768 };
+      const group = await participant(browser, { viewport, isMobile: true, hasTouch: true });
+      await group.goto(joinUrl);
+      await group.getByRole('button', { name: `${locale.choose} ${site}`, exact: true }).tap();
+      await group.getByRole('heading', { name: locale.puzzle }).waitFor();
+      const entry = group.getByRole('link', { name: locale.explore, exact: true });
+      const openingMap = entry.locator('svg');
+      const landmarks = (map) => map.locator('.map-station, .map-river, .map-wetland')
+        .evaluateAll(shapes => shapes.map(shape => shape.outerHTML));
+      const openingLandmarks = await landmarks(openingMap);
+      assert.equal(await openingMap.locator('.map-station').count(), 2);
+      const wetlandY = Number(await openingMap.locator('.map-wetland').getAttribute('y'));
+      assert.equal(wetlandY, site === 'A' ? 160 : 62);
+      assert.equal(await openingMap.locator('.map-railway').count(), 0);
+
+      if (site === 'A') {
+        await openingMap.locator('.map-wetland').tap();
+      } else {
+        for (let tab = 0; tab < 3; tab++) await group.keyboard.press('Tab');
+        assert.ok(await entry.evaluate(link => link === document.activeElement));
+        await group.keyboard.press('Enter');
+      }
+      await group.getByRole('heading', { name: locale.comparison }).waitFor();
+      assert.equal(await group.locator('html').getAttribute('lang'), locale.tag);
+      assert.match(await group.locator('.site-note').innerText(), new RegExp(`(?:Site|場地) ${site}`));
+      const grid = group.locator('.season-grid');
+      assert.deepEqual(await grid.getByRole('heading').allTextContents(), locale.seasons);
+      const maps = await grid.getByRole('group').all();
+      assert.equal(maps.length, 4);
+      const habitatShapes = new Set();
+      for (const map of maps) {
+        assert.deepEqual(await landmarks(map), openingLandmarks);
+        assert.equal(await map.getAttribute('viewBox'), '0 0 720 344');
+        assert.ok(await map.evaluate(svg => svg.getBoundingClientRect().bottom <= innerHeight));
+        const habitat = map.locator('.map-habitat');
+        assert.ok(Number(await habitat.getAttribute('y')) > wetlandY);
+        habitatShapes.add(await habitat.evaluate(shape => shape.outerHTML));
+        assert.equal(await map.locator('.map-railway').count(), 0);
+      }
+      assert.equal(habitatShapes.size, 4);
+      const [spring, summer, autumn, winter] = await grid.locator('figure').evaluateAll(
+        cards => cards.map(card => card.getBoundingClientRect().toJSON()),
+      );
+      assert.ok(spring.x < summer.x && spring.y === summer.y);
+      assert.ok(autumn.x < winter.x && autumn.y === winter.y && spring.y < autumn.y);
+      assert.ok(await group.evaluate(() => document.documentElement.scrollWidth === innerWidth));
+
+      await group.getByRole('button', { name: locale.alternate, exact: true }).tap();
+      await group.waitForFunction(lang => document.documentElement.lang !== lang, locale.tag);
+      assert.deepEqual(await landmarks(grid.getByRole('group').first()), openingLandmarks);
+      await group.getByRole('link', { name: /Back to the railway puzzle|返回鐵路難題/ }).tap();
+      await group.getByRole('heading', { name: /How would you get a railway across Long Valley\?|你會怎樣讓鐵路穿越塱原？/ }).waitFor();
+      assert.deepEqual(await landmarks(group.locator('.wetland-entry svg')), openingLandmarks);
+
+      if (site === 'B') {
+        const autumnButton = group.getByRole('button', { name: /^(Autumn|秋季)$/ });
+        await autumnButton.tap();
+        await group.getByRole('link', { name: /^(Explore through the year|探索濕地四季)$/ }).tap();
+        await grid.waitFor();
+        await group.getByRole('link', { name: /Back to the railway puzzle|返回鐵路難題/ }).tap();
+        assert.equal(await autumnButton.getAttribute('aria-pressed'), 'true');
+      }
+      await group.close();
+    }
+  });
+}
 
 test('reopening the link or scanning the QR of a closed Traditional Chinese class shows its closing message in Chinese', { timeout: 30000 }, async (t) => {
   const { browser, issueCredential, origin } = await classroom(t);

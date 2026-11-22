@@ -125,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
                 season = fields.get("season", [DEFAULT_SEASON])[0]
                 if season not in SEASONAL_HABITAT:
                     season = DEFAULT_SEASON
+                if fields.get("explore") == ["year"]:
+                    return Response(200, views.wetland_comparison(session, group, season=season))
                 return Response(200, views.group_opening(
                     session, group, season=season, notice=fields.get("notice", [""])[0],
                 ))
@@ -231,12 +233,15 @@ class Handler(BaseHTTPRequestHandler):
 
         anchor = "#crossing-comparison"
         notice = ""
+        explore = ""
         if action == "language":
             preferred = fields.get("language", [""])[0]
             if preferred not in views.LANGUAGES:
                 return Response(400)
             group.language = preferred
             anchor = ""
+            if fields.get("explore") == ["year"]:
+                explore = "&explore=year"
         elif action == "design":
             group.tested_design = draft
             group.show_works = True
@@ -261,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(400)
         group.draft_design = draft
         season_query = f"&season={season}" if season != DEFAULT_SEASON else ""
-        return self.redirect(f"{join_path}{season_query}{notice}{anchor}")
+        return self.redirect(f"{join_path}{season_query}{explore}{notice}{anchor}")
 
 
 def run(host, port, public_url, duration_seconds, credentials):

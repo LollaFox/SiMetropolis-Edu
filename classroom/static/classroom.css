@@ -43,6 +43,26 @@ form.inline { display: inline-flex; margin: 0; }
 .end { border-color: #944332; background: transparent; color: #883b29; }
 .end:hover { background: #f3e4d9; }
 .site { margin-top: 1.3rem; }
+.wetland-entry { display: block; max-width: 48rem; }
+.wetland-entry .button { margin-bottom: .65rem; }
+.wetland-entry:is(:hover, :focus-visible) .map-wetland { fill: #9cbe7d; stroke: #235c46; stroke-width: 4px; }
+.wetland-entry:hover .button { background: #103f33; }
+.comparison-page { margin-block: 0; }
+.wetland-overview { padding: clamp(1rem, 2vw, 1.6rem); }
+.wetland-overview form[hidden] { display: none; }
+.wetland-overview .opening { margin: .4rem 0 .7rem; }
+.wetland-overview h1 { font-size: clamp(1.7rem, 4vw, 2.5rem); }
+.wetland-overview .site-note { margin: .4rem 0 0; }
+.season-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.season-card { margin: 0; padding: .7rem; background: #f2f4e9; border: 1px solid #c5d2bf; border-radius: .65rem; }
+.season-card h2 { margin: 0 0 .4rem; font-size: 1.15rem; }
+.season-card figcaption { margin-top: .45rem; font-size: .875rem; line-height: 1.35; }
+.season-card figcaption strong { display: block; }
+.season-grid .site-map text { font-size: 23px; }
+.season-grid [data-season="summer"] .map-habitat { fill: #83aa75; }
+.season-grid [data-season="autumn"] .map-habitat { fill: #dec47c; }
+.season-grid [data-season="winter"] .map-habitat { fill: #8ab1b0; }
+.season-source { margin: .65rem 0 0; font-size: .85rem; }
 .investigation, #crossing-comparison { scroll-margin-top: 1rem; }
 .investigation h3 { margin: 1.4rem 0 .5rem; }
 .crossing-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: .75rem; }
@@ -126,6 +146,11 @@ summary { cursor: pointer; }
   .design-actions { align-items: start; }
 }
 
+@media (orientation: landscape) and (max-height: 54rem) {
+  .comparison-page { max-width: 53rem; padding-block: .65rem; }
+  .wetland-overview { padding: 1rem; }
+}
+
 @media (max-width: 39rem) {
   .projection { grid-template-columns: 1fr; }
   .opening { grid-template-columns: 1fr; row-gap: .65rem; }
@@ -139,4 +164,6 @@ summary { cursor: pointer; }
   .season-controls .compare-controls { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; width: 100%; }
   .season-controls .compare-controls button { font-size: .85rem; padding-inline: .2rem; }
   .site-map text { font-size: 23px; }
+  .season-grid { gap: .45rem; }
+  .season-card { padding: .45rem; }
 }

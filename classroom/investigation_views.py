@@ -9,6 +9,7 @@ from .localization import words
 
 COPY = {
     "investigation": ("Crossing investigation", "鐵路走線探究"),
+    "opening_map": ("Opening site map", "起始場地地圖"),
     "map": ("{} site map", "{}場地地圖"),
     "viewing_season": ("Viewing season", "查看季節"),
     "spring": ("Spring", "春季"),
@@ -167,7 +168,7 @@ def season_scene(group, season, crossing, t):
         stage_status = f'<p class="stage-status">{status}</p>'
     return f"""<div>
   {stage_status}
-  {site_map(group.site, season, crossing, works, habitat, overlaps, t)}
+  {site_map(group.site, t, season=season, layer=crossing_layer(crossing, works, overlaps, t))}
   <ul class="map-key" aria-label="{t["map_key"]}">{map_key(keys, season, t)}</ul>
   {finding_panel(group, season, overlaps, scheduled, t)}
   {season_observation(group.language, season, t)}
@@ -212,12 +213,31 @@ def finding_panel(group, season, overlaps, scheduled, t):
 
 
 def season_observation(language, season, t):
-    locale = "tc" if language == "zh-Hant" else "en"
-    source = f"https://www.lvnp.gov.hk/{locale}/LVNP_Seasonal_attractions.htm"
     return f"""<aside class="season-observation" aria-label="{t["observed"]}">
   <strong>{t["observed"]}</strong>
-  <p>{t[f"observed_{season}"]} <a href="{source}" target="_blank" rel="noopener">{t["source"]}</a></p>
+  <p>{t[f"observed_{season}"]} {seasonal_guide_link(language, t)}</p>
 </aside>"""
+
+
+def seasonal_guide_link(language, t):
+    locale = "tc" if language == "zh-Hant" else "en"
+    source = f"https://www.lvnp.gov.hk/{locale}/LVNP_Seasonal_attractions.htm"
+    return f'<a href="{source}" target="_blank" rel="noopener">{t["source"]}</a>'
+
+
+def opening_map(site, language):
+    return site_map(site, words(language, COPY))
+
+
+def seasonal_maps(site, language):
+    t = words(language, COPY)
+    cards = "".join(f"""<figure class="season-card">
+  <h2>{t[season]}</h2>
+  {site_map(site, t, season=season)}
+  <figcaption><strong>{t[f"habitat_{season}"]}</strong> {t[f"observed_{season}"]}</figcaption>
+</figure>""" for season in SEASONAL_HABITAT)
+    return f"""<div class="season-grid">{cards}</div>
+<p class="season-source">{t["observed"]} · {seasonal_guide_link(language, t)}</p>"""
 
 
 def model_rule(t):
@@ -252,41 +272,47 @@ def overlap_links(overlaps, t):
     return "".join(hit_areas + highlights)
 
 
-def site_map(site, season, crossing, works, habitat, overlaps, t):
-    wetland_top = WETLAND_TOP[site]
-    railway = ""
-    footprints = ""
-    if crossing:
-        railway = ("".join(railway_segment(line) for line in crossing.surface_lines)
-                   + "".join(railway_segment(line, " map-tunnel") for line in crossing.tunnel_lines))
-        if not works:
-            railway = f'<g class="planned-railway">{railway}</g>'
-        footprints = "".join(footprint_rect(box, f"map-{work}")
-                             for work, boxes in works.items() for box in boxes)
-    stations = "".join(
-        f'<rect class="map-station" x="{x - 7}" y="{y - 7}" width="14" height="14" rx="3"/>'
-        f'<text x="{x}" y="{y + 31}" text-anchor="middle">{t[key]}</text>'
-        for (x, y), key in zip(STATIONS, ("station_west", "station_east"))
-    )
-    map_label = t["map"].format(t[season])
-    return f"""<svg class="site-map" data-season="{season}" viewBox="0 0 720 {MAP_BOTTOM}" role="group" aria-label="{map_label}" aria-describedby="site-map-features">
-  <desc id="site-map-features">{t["river"]} · {t["wetland"]} · {t["station_west"]} · {t["station_east"]}</desc>
-  <defs>
+def crossing_layer(crossing, works, overlaps, t):
+    if crossing is None:
+        return ""
+    railway = ("".join(railway_segment(line) for line in crossing.surface_lines)
+               + "".join(railway_segment(line, " map-tunnel") for line in crossing.tunnel_lines))
+    if not works:
+        railway = f'<g class="planned-railway">{railway}</g>'
+    footprints = "".join(footprint_rect(box, f"map-{work}")
+                         for work, boxes in works.items() for box in boxes)
+    return f"""<defs>
     <pattern id="footprint-overlap" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
       <rect width="5" height="5" fill="#ffdea1"/>
       <path d="M0 0V5" stroke="#9a3c20" stroke-width="3"/>
     </pattern>
   </defs>
+  {railway}
+  {footprints}
+  {overlap_links(overlaps, t)}"""
+
+
+def site_map(site, t, *, season=None, layer=""):
+    wetland_top = WETLAND_TOP[site]
+    stations = "".join(
+        f'<rect class="map-station" x="{x - 7}" y="{y - 7}" width="14" height="14" rx="3"/>'
+        f'<text x="{x}" y="{y + 31}" text-anchor="middle">{t[key]}</text>'
+        for (x, y), key in zip(STATIONS, ("station_west", "station_east"))
+    )
+    map_label = t["map"].format(t[season]) if season else t["opening_map"]
+    season_attribute = f' data-season="{season}"' if season else ""
+    description_id = f"site-map-features-{season or 'opening'}"
+    habitat = footprint_rect(seasonal_habitat(site, season), "map-habitat") if season else ""
+    return f"""<svg class="site-map"{season_attribute} viewBox="0 0 720 {MAP_BOTTOM}" role="group" aria-label="{map_label}" aria-describedby="{description_id}">
+  <desc id="{description_id}">{t["river"]} · {t["wetland"]} · {t["station_west"]} · {t["station_east"]}</desc>
   <rect class="map-land" width="720" height="{MAP_BOTTOM}"/>
   <path class="map-fields" d="M0 77H174L185 156H0Z M192 77H289L280 156H204Z M474 77H720V156H507Z
     M0 263H125L143 344H0Z M145 263H251L230 344H163Z M477 263H565L547 344H457Z M586 263H720V344H568Z"/>
   <path class="map-river" d="M0 0H720V40Q594 31 484 47T242 45T0 50Z"/>
   <text x="34" y="31">{t["river"]}</text>
   <rect class="map-wetland" x="225" y="{wetland_top}" width="270" height="104" rx="28"/>
-  {footprint_rect(habitat, "map-habitat")}
-  {railway}
-  {footprints}
-  {overlap_links(overlaps, t)}
+  {habitat}
+  {layer}
   <text x="407" y="{wetland_top + 97}" text-anchor="middle">{t["wetland"]}</text>
   {stations}
 </svg>"""
