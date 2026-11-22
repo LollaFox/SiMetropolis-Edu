@@ -8,6 +8,15 @@ ALIGNMENTS = {"central": 210, "north": 112, "south": 288}
 ACCESS_ROUTES = ("east", "valley")
 WETLAND_TOP = {"A": 160, "B": 62}
 MAP_BOTTOM = 344
+STAGES = ("construction", "operation")
+DEFAULT_SEASON = "spring"
+# Classroom habitat shapes relative to the north edge of the wetland.
+SEASONAL_HABITAT = {
+    "spring": (275, 20, 170, 57),
+    "summer": (285, 44, 155, 44),
+    "autumn": (245, 52, 188, 38),
+    "winter": (315, 9, 145, 45),
+}
 
 
 @dataclass(frozen=True)
@@ -15,6 +24,7 @@ class Design:
     alignment: str = "central"
     crossing_type: str = "elevated"
     access_route: str = "east"
+    construction_season: str = DEFAULT_SEASON
 
 
 @dataclass(frozen=True)
@@ -38,14 +48,22 @@ class Footprint:
 class CrossingGeometry:
     surface_lines: tuple
     tunnel_lines: tuple
-    works: dict
+    access: tuple
+    permanent_works: dict
+
+    def active_footprints(self, stage, construction_scheduled):
+        if stage == "operation":
+            return self.permanent_works
+        if construction_scheduled:
+            return {"access": self.access, **self.permanent_works}
+        return {}
 
 
 def elevated_crossing(points, access):
     _, (west_end, y), (east_end, _), _ = points
     supports = tuple(Footprint(x - 6, y - 6, 12, 12) for x in range(west_end, east_end + 1, 100))
     return CrossingGeometry(
-        surface_lines=(points,), tunnel_lines=(), works={"access": access, "supports": supports},
+        surface_lines=(points,), tunnel_lines=(), access=access, permanent_works={"supports": supports},
     )
 
 
@@ -54,7 +72,7 @@ def tunnel_crossing(points, access):
     entrances = tuple(Footprint(x - 11, y - 9, 22, 18) for x, y in portals)
     return CrossingGeometry(
         surface_lines=(points[:2], points[2:]), tunnel_lines=(portals,),
-        works={"access": access, "entrances": entrances},
+        access=access, permanent_works={"entrances": entrances},
     )
 
 
@@ -85,8 +103,9 @@ def access_footprint(route, east_end, y):
     )
 
 
-def nesting_habitat(site):
-    return Footprint(275, WETLAND_TOP[site] + 20, 170, 57)
+def seasonal_habitat(site, season):
+    x, offset, width, height = SEASONAL_HABITAT[season]
+    return Footprint(x, WETLAND_TOP[site] + offset, width, height)
 
 
 def overlapping_works(works, habitat):

@@ -3,7 +3,7 @@
 from html import escape
 from urllib.parse import quote
 
-from .investigation_views import spring_investigation
+from .investigation_views import crossing_investigation
 from .localization import words
 from .state import CODE_LENGTH, SITES
 
@@ -222,7 +222,7 @@ def choose_site(session, taken=False):
 </section>""", layout="wide", session=session)
 
 
-def group_opening(session, group, *, notice=""):
+def group_opening(session, group, *, season, notice=""):
     language, site = group.language, group.site
     t = words(language, COPY)
     return page(language, t["puzzle"], f"""
@@ -236,6 +236,6 @@ def group_opening(session, group, *, notice=""):
     <p class="site-note">{t["imagined"]}</p>
     <h2>{t[site]}</h2>
     <p>{t["site_" + site]}</p>
-    {spring_investigation(session, group, notice)}
+    {crossing_investigation(session, group, season, notice)}
   </section>
 </section>""", layout="wide", session=session)

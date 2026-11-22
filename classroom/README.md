@@ -12,7 +12,9 @@ python -B -m classroom serve
 
 Save the printed teacher credential privately. Open [the teacher view](http://127.0.0.1:8899/teacher), sign in, and choose the opening language. Start a class, open **Project join information** in the same signed-in browser, and show that tab on the projector. Two neighbouring groups can use the displayed link, QR code, or short code to take one starting site each. Each group shares one device and can switch languages after choosing its site.
 
-Groups choose an alignment, crossing type, and construction access route, then select **Test crossing**. The spring map compares the same site with and without the proposed works. Select a striped area on the map to see which work overlaps modelled nesting habitat there. Keyboard users can tab to the area and press Enter. **Possible disturbance** lists all findings for the crossing.
+Groups choose an alignment, crossing type, construction access route, and construction season, then select **Test crossing**. Select a season directly or use **Play seasons** and **Pause seasons** to follow the same crossing through the year. The baseline uses the same site and seasonal habitat. The park guide observation describes the real Long Valley, while the map shows habitat shapes for the classroom experiment.
+
+The classroom schedule places works in one season. **Construction** shows the active footprints in the scheduled season, and **Operation** shows the permanent bridge supports or tunnel entrances in every season after opening. Select a striped area to inspect the site, seasonal habitat, and footprint involved. Keyboard users can tab to the area and press Enter. **Possible disturbance** lists the overlaps for the current view.
 
 Groups can switch language or compare views while editing a design. Their selections stay in the controls until they test or reset the crossing. **Replay crossing** reruns the last tested design. **Reset crossing** restores the opening design and map at the assigned site.
 
@@ -36,4 +38,4 @@ node --test tools/check_long_valley.mjs
 
 The tests launch an isolated loopback classroom and use independent browser contexts for teachers and groups. They verify that only the class teacher can load the projection and its QR image. They decode the QR, join both sites, and exercise both languages. They also check manual ending, expiry, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
 
-The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
+The investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited. They also play and pause the four seasons, jump directly to a season, reschedule the same crossing in both languages, and check that the permanent footprint survives a date change during operation.

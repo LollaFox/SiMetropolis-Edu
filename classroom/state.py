@@ -40,6 +40,7 @@ class Group:
     draft_design: Design = field(default_factory=Design)
     tested_design: Design = field(default_factory=Design)
     show_works: bool = True
+    stage: str = "construction"
 
 
 @dataclass

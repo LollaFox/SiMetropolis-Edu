@@ -12,7 +12,9 @@ import qrcode
 from qrcode.image.pure import PyPNGImage
 
 from . import views
-from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
+from .investigation import (
+    ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, DEFAULT_SEASON, SEASONAL_HABITAT, STAGES, Design,
+)
 from .state import Classroom
 
 
@@ -20,6 +22,7 @@ STATIC = Path(__file__).with_name("static")
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
+    "/season-playback.js": ("season-playback.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -119,7 +122,12 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(410, views.unavailable(language, join_code=code))
             group = session.groups.get(self.cookie_value("group_session"))
             if group:
-                return Response(200, views.group_opening(session, group, notice=fields.get("notice", [""])[0]))
+                season = fields.get("season", [DEFAULT_SEASON])[0]
+                if season not in SEASONAL_HABITAT:
+                    season = DEFAULT_SEASON
+                return Response(200, views.group_opening(
+                    session, group, season=season, notice=fields.get("notice", [""])[0],
+                ))
             return Response(200, views.choose_site(session, taken="taken" in fields))
         if path.startswith("/classes/"):
             code, _, action = path.removeprefix("/classes/").partition("/")
@@ -205,38 +213,55 @@ class Handler(BaseHTTPRequestHandler):
         if group is None or action not in {"language", "design", "view"}:
             return Response(404)
 
+        season = fields.get("season", [DEFAULT_SEASON])[0]
+        if season not in SEASONAL_HABITAT:
+            return Response(400)
+
         draft = group.draft_design
-        if action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}:
+        design_fields = {"alignment", "crossing_type", "access", "construction_season"}
+        if action == "design" or fields.keys() & design_fields:
             alignment = fields.get("alignment", [""])[0]
             crossing_type = fields.get("crossing_type", [""])[0]
             access_route = fields.get("access", [""])[0]
+            construction_season = fields.get("construction_season", [draft.construction_season])[0]
             if (alignment not in ALIGNMENTS or crossing_type not in CROSSING_TYPES
-                    or access_route not in ACCESS_ROUTES):
+                    or access_route not in ACCESS_ROUTES or construction_season not in SEASONAL_HABITAT):
                 return Response(400)
-            draft = Design(alignment, crossing_type, access_route)
+            draft = Design(alignment, crossing_type, access_route, construction_season)
 
-        destination = f"{join_path}#spring-comparison"
+        anchor = "#crossing-comparison"
+        notice = ""
         if action == "language":
             preferred = fields.get("language", [""])[0]
             if preferred not in views.LANGUAGES:
                 return Response(400)
             group.language = preferred
-            destination = join_path
+            anchor = ""
         elif action == "design":
             group.tested_design = draft
             group.show_works = True
         else:
             view = fields.get("view", [""])[0]
-            if view not in {"proposed", "baseline", "replay", "reset"}:
-                return Response(400)
-            group.show_works = view != "baseline"
             if view == "reset":
                 draft = group.tested_design = Design()
-                destination = f"{join_path}#spring-investigation"
+                group.show_works = True
+                group.stage = "construction"
+                season = DEFAULT_SEASON
+                anchor = "#crossing-investigation"
             elif view == "replay":
-                destination = f"{join_path}&notice=replayed#spring-comparison"
+                group.show_works = True
+                notice = "&notice=replayed"
+            elif view in {"proposed", "baseline"}:
+                group.show_works = view == "proposed"
+            elif view in STAGES:
+                group.stage = view
+            elif view in SEASONAL_HABITAT:
+                season = view
+            else:
+                return Response(400)
         group.draft_design = draft
-        return self.redirect(destination)
+        season_query = f"&season={season}" if season != DEFAULT_SEASON else ""
+        return self.redirect(f"{join_path}{season_query}{notice}{anchor}")
 
 
 def run(host, port, public_url, duration_seconds, credentials):

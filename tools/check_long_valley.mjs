@@ -450,7 +450,7 @@ test('switching language preserves the untested draft, baseline and last tested 
 
   await group.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
   assert.equal(await group.locator('html').getAttribute('lang'), 'zh-Hant');
-  assert.equal(await group.getByLabel('鐵路走線').inputValue(), 'south');
+  assert.equal(await group.getByLabel('鐵路走線', { exact: true }).inputValue(), 'south');
   assert.equal(await group.getByLabel('鐵路形式').inputValue(), 'elevated');
   assert.equal(await group.getByRole('combobox', { name: '施工通道', exact: true }).inputValue(), 'east');
   await group.getByText('春季基準', { exact: true }).waitFor();
@@ -459,7 +459,7 @@ test('switching language preserves the untested draft, baseline and last tested 
   await group.getByRole('button', { name: '重播走線測試' }).click();
   await group.getByText('可能造成滋擾', { exact: true }).click();
   await group.getByText('施工通道與模型中的築巢生境重疊。', { exact: true }).waitFor();
-  await group.getByText('春季模型如何判斷？', { exact: true }).click();
+  await group.getByText('模型如何判斷？', { exact: true }).click();
   await group.getByRole('link', { name: '塱原自然生態公園四季指南' }).waitFor();
   await group.getByRole('button', { name: 'English' }).click();
   await group.getByText('Possible disturbance', { exact: true }).waitFor();
@@ -469,4 +469,122 @@ test('switching language preserves the untested draft, baseline and last tested 
   await group.getByRole('button', { name: 'Test crossing' }).click();
   await group.getByText('No modelled overlap', { exact: true }).waitFor();
   await group.getByRole('list', { name: 'Map key' }).getByText('Bridge supports', { exact: true }).waitFor();
+});
+
+test('season playback and direct jumps preserve the tested crossing and the in-progress draft', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await testNorthernTunnelAtSiteB(groupAt);
+  await group.getByRole('button', { name: 'Operation', exact: true }).click();
+  const seasons = group.getByRole('group', { name: 'Viewing season' });
+  const map = group.locator('#season-scene svg');
+  const track = await map.locator('.map-tunnel').getAttribute('points');
+  const observation = group.getByRole('complementary', { name: 'Observed at Long Valley' });
+  await observation.getByText(/moorhens build nests in spring/).waitFor();
+  await group.getByLabel('Railway alignment').selectOption('south');
+  await group.getByLabel('Construction season', { exact: true }).selectOption('autumn');
+  await group.clock.install();
+  await group.getByRole('button', { name: 'Play seasons' }).click();
+
+  for (const [season, note] of [
+    ['Summer', /Young black-winged stilts and common moorhens/],
+    ['Autumn', /Ripe rice offers food/],
+    ['Winter', /Eurasian teal and common snipe/],
+  ]) {
+    await group.clock.runFor(2500);
+    await seasons.getByRole('button', { name: season, pressed: true }).waitFor();
+    await observation.getByText(note).waitFor();
+    assert.equal(await map.locator('.map-tunnel').getAttribute('points'), track);
+    assert.equal(await group.getByLabel('Railway alignment').inputValue(), 'south');
+    assert.equal(await group.getByLabel('Construction season', { exact: true }).inputValue(), 'autumn');
+  }
+
+  await group.getByRole('button', { name: 'Pause seasons' }).click();
+  await group.clock.runFor(5000);
+  await seasons.getByRole('button', { name: 'Winter', pressed: true }).waitFor();
+  await seasons.getByRole('button', { name: 'Summer' }).click();
+  await group.getByRole('group', { name: 'Summer site map' }).waitFor();
+  await group.getByRole('button', { name: '繁體中文' }).click();
+  await group.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
+  await group.getByRole('group', { name: '夏季場地地圖' }).waitFor();
+  await group.getByRole('button', { name: '營運', pressed: true }).waitFor();
+  assert.equal(await group.getByLabel('鐵路走線', { exact: true }).inputValue(), 'south');
+  assert.equal(await group.getByLabel('施工季節', { exact: true }).inputValue(), 'autumn');
+  assert.equal(await map.locator('.map-tunnel').getAttribute('points'), track);
+  await group.reload();
+  await group.getByRole('group', { name: '夏季場地地圖' }).waitFor();
+  await group.getByRole('link', { name: '塱原自然生態公園四季指南' }).waitFor();
+});
+
+test('moving construction changes the finding at a fixed season and replay reproduces that view', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const map = group.getByRole('group', { name: 'Spring site map' });
+  const habitat = () => map.locator('.map-habitat').evaluate(shape => shape.outerHTML);
+  const timing = group.getByLabel('Construction season', { exact: true });
+  const testCrossing = group.getByRole('button', { name: 'Test crossing' });
+  const finding = group.getByText('Possible disturbance', { exact: true });
+  await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption('valley');
+  await testCrossing.click();
+  await finding.click();
+  await group.getByText('Site A · Spring · Construction', { exact: true }).waitFor();
+  await group.getByText('Construction access route overlaps modelled nesting habitat.', { exact: true }).waitFor();
+  const springHabitat = await habitat();
+  const initialMap = await map.innerHTML();
+
+  await group.getByRole('button', { name: 'Without proposed works' }).click();
+  await group.getByText('Spring baseline', { exact: true }).waitFor();
+  assert.equal(await habitat(), springHabitat);
+  assert.equal(await map.locator('.map-railway, .map-overlap').count(), 0);
+  await group.getByRole('button', { name: 'Replay crossing' }).click();
+  await group.getByText('Crossing replayed.', { exact: true }).waitFor();
+  assert.equal(await map.innerHTML(), initialMap);
+
+  await timing.selectOption('summer');
+  await testCrossing.click();
+  await group.getByText('No construction this season', { exact: true }).waitFor();
+  assert.equal(await finding.count(), 0);
+  assert.equal(await habitat(), springHabitat);
+  assert.equal(await map.locator('.map-access, .map-supports').count(), 0);
+  await group.getByRole('button', { name: 'Summer', exact: true }).click();
+  await finding.click();
+  await group.getByText('Construction access route overlaps modelled habitat for young birds.', { exact: true }).waitFor();
+
+  await group.getByRole('button', { name: '繁體中文' }).click();
+  await group.getByText('可能造成滋擾', { exact: true }).click();
+  await group.getByText('場地 A · 夏季 · 施工', { exact: true }).waitFor();
+  await group.getByText('施工通道與模型中的幼鳥生境重疊。', { exact: true }).waitFor();
+  await group.getByLabel('施工季節', { exact: true }).selectOption('winter');
+  await group.getByRole('button', { name: '測試走線' }).click();
+  await group.getByText('這個季節沒有施工', { exact: true }).waitFor();
+  await group.getByRole('group', { name: '夏季場地地圖' }).waitFor();
+});
+
+test('operation removes temporary access and keeps permanent footprints after rescheduling', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const map = group.getByRole('group', { name: 'Spring site map' });
+  const key = group.getByRole('list', { name: 'Map key' });
+  await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption('valley');
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  await key.getByText('Temporary', { exact: true }).waitFor();
+  await key.getByText('Permanent', { exact: true }).waitFor();
+  assert.equal(await map.locator('.map-access').count(), 3);
+  assert.equal(await map.locator('.map-supports').count(), 5);
+
+  await group.getByRole('button', { name: 'Operation', exact: true }).click();
+  await group.getByText('Possible disturbance', { exact: true }).click();
+  await group.getByText('Site A · Spring · Operation', { exact: true }).waitFor();
+  await group.getByText('Bridge supports overlap modelled nesting habitat.', { exact: true }).waitFor();
+  assert.equal(await key.getByText('Temporary', { exact: true }).count(), 0);
+  assert.equal(await map.locator('.map-access').count(), 0);
+  assert.equal(await map.locator('.map-supports').count(), 5);
+  const operationMap = await map.innerHTML();
+
+  await group.getByLabel('Construction season', { exact: true }).selectOption('autumn');
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  await group.getByRole('button', { name: 'Operation', pressed: true }).waitFor();
+  assert.equal(await map.innerHTML(), operationMap);
+  await group.getByRole('button', { name: 'Construction', exact: true }).click();
+  await group.getByText('No construction this season', { exact: true }).waitFor();
+  assert.equal(await map.locator('.map-supports, .map-access').count(), 0);
 });
