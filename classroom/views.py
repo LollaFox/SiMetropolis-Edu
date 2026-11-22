@@ -23,6 +23,10 @@ COPY = {
     "credential": ("Teacher credential", "教師憑證"),
     "sign_in": ("Sign in", "登入"),
     "bad_credential": ("Check your teacher credential and try again.", "請檢查教師憑證，然後再試一次。"),
+    "launch_wait": ("Opening the teacher view…", "正在開啟教師介面⋯"),
+    "launch_renewed": ("Your sign-in link expired. Continue in the new teacher tab.",
+                       "登入連結已逾時。請到新開啟的教師分頁繼續。"),
+    "launch_error": ("Open SiMetropolis Edu again to reach the teacher view.", "請重新開啟 SiMetropolis Edu，以進入教師介面。"),
     "start_title": ("Open a Long Valley class", "開啟塱原課堂"),
     "start_help": ("Choose the language groups see when they join.", "選擇小組加入時使用的語言。"),
     "starting_language": ("Starting language", "起始語言"),
@@ -134,6 +138,18 @@ def sign_in(language, invalid=False):
     <button>{t["sign_in"]}</button>
   </form>
   {language_link("/teacher", language)}
+</section>""")
+
+
+def teacher_launch(language):
+    t = words(language, COPY)
+    return page(language, t["teacher_entry"], f"""
+<section class="panel">
+  <h1>{t["teacher_entry"]}</h1>
+  <p id="launch-status" role="status">{t["launch_wait"]}</p>
+  <p id="launch-renewed" role="status" hidden>{t["launch_renewed"]}</p>
+  <p id="launch-error" class="alert" role="alert" hidden>{t["launch_error"]}</p>
+  <script src="/teacher-launch.js" defer></script>
 </section>""")
 
 

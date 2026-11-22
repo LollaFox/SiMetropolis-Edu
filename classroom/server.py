@@ -5,9 +5,12 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
+import secrets
+from threading import Thread
 from time import monotonic
 from typing import Union
 from urllib.parse import parse_qs
+import webbrowser
 
 import qrcode
 from qrcode.image.pure import PyPNGImage
@@ -22,6 +25,7 @@ SWAP_WAIT_SECONDS = 15
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
+    "/teacher-launch.js": ("teacher-launch.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -32,6 +36,32 @@ class Response:
     headers: tuple = ()
     content_type: str = "text/html; charset=utf-8"
     cache_control: str = "no-store"
+
+
+class ExpiredLaunchTicket(Exception):
+    """The pending sign-in link reached the browser after its deadline."""
+
+
+class TeacherLaunch:
+    def __init__(self, credential):
+        self._credential = credential
+        self.renew()
+
+    def renew(self):
+        self.ticket = secrets.token_urlsafe(32)
+        self._expires_at = monotonic() + 120
+
+    def is_pending(self, ticket):
+        return self._credential is not None and secrets.compare_digest(self.ticket.encode(), ticket.encode())
+
+    def redeem(self, ticket):
+        if not self.is_pending(ticket):
+            return None
+        if monotonic() >= self._expires_at:
+            raise ExpiredLaunchTicket
+        credential = self._credential
+        self._credential = None
+        return credential
 
 
 def student_join_path(session, *, language=None):
@@ -75,7 +105,7 @@ class Handler(BaseHTTPRequestHandler):
             return ""
 
     def teacher_id(self):
-        return self.classroom.teacher_for_session(self.cookie_value("teacher_session"))
+        return self.classroom.teacher_for_session(self.cookie_value(self.server.teacher_cookie_name))
 
     def owned_class(self, code, language) -> Union[ClassSession, Response]:
         teacher = self.teacher_id()
@@ -92,6 +122,12 @@ class Handler(BaseHTTPRequestHandler):
         secure = "; Secure" if self.server.origin.startswith("https://") else ""
         max_age = "; Max-Age=0" if clear else ""
         return f"{name}={value}; Path={path}; HttpOnly; SameSite=Strict{secure}{max_age}"
+
+    def sign_in_teacher(self, credential):
+        token = self.classroom.sign_in(credential) if credential else None
+        if token is None:
+            return None
+        return self.session_cookie(self.server.teacher_cookie_name, token, "/teacher")
 
     def redirect(self, path, cookie=None):
         headers = [("Location", path)]
@@ -149,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
     def get_page(self, path, language, fields):
         if path == "/":
             return Response(200, views.home(language))
+        if path == "/teacher/launch" and self.server.teacher_launch:
+            return Response(200, views.teacher_launch(language))
         if path == "/teacher":
             teacher = self.teacher_id()
             if teacher is None:
@@ -231,15 +269,27 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(response)
 
     def post_page(self, path, language, fields):
+        if path == "/teacher/launch" and self.server.teacher_launch:
+            launch = self.server.teacher_launch
+            try:
+                credential = launch.redeem(fields.get("ticket", [""])[0])
+            except ExpiredLaunchTicket:
+                # Only the local browser opener receives the replacement link.
+                launch.renew()
+                open_teacher_browser(self.server)
+                return Response(202)
+            cookie = self.sign_in_teacher(credential)
+            if cookie is None:
+                return Response(403)
+            return Response(204, headers=(("Set-Cookie", cookie),))
         if path == "/teacher/sign-in":
-            token = self.classroom.sign_in(fields.get("credential", [""])[0].strip())
-            if token is None:
+            cookie = self.sign_in_teacher(fields.get("credential", [""])[0].strip())
+            if cookie is None:
                 return Response(401, views.sign_in(language, invalid=True))
-            cookie = self.session_cookie("teacher_session", token, "/teacher")
             return self.redirect(f"/teacher?lang={language}", cookie)
         if path == "/teacher/sign-out":
-            self.classroom.sign_out(self.cookie_value("teacher_session"))
-            cookie = self.session_cookie("teacher_session", "", "/teacher", clear=True)
+            self.classroom.sign_out(self.cookie_value(self.server.teacher_cookie_name))
+            cookie = self.session_cookie(self.server.teacher_cookie_name, "", "/teacher", clear=True)
             return self.redirect(f"/teacher?lang={language}", cookie)
         if path == "/teacher/start":
             teacher = self.teacher_id()
@@ -343,12 +393,45 @@ class Handler(BaseHTTPRequestHandler):
         return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
 
 
-def run(host, port, public_url, duration_seconds, credentials):
+def open_teacher_browser(server):
+    launch = server.teacher_launch
+    ticket = launch.ticket
+    # The browser fragment keeps the single-use ticket out of HTTP requests and referrers.
+    url = f"{server.origin}/teacher/launch#{ticket}"
+
+    def open_browser():
+        try:
+            if webbrowser.open_new_tab(url):
+                return
+        except Exception:
+            pass
+        with server.classroom.lock:
+            # A foreground opener can report failure after sign-in or renewal.
+            if not launch.is_pending(ticket):
+                return
+            server.browser_open_failed = True
+        server.shutdown()
+
+    # Foreground browser commands may wait for the page or even for the browser to exit.
+    Thread(target=open_browser, daemon=True).start()
+
+
+def run(host, port, public_url, duration_seconds, credentials, *, launch_teacher=False):
     with ThreadingHTTPServer((host, port), Handler) as server:
         server.classroom = Classroom(credentials, duration_seconds)
         server.origin = public_url or f"http://127.0.0.1:{server.server_port}"
-        print(server.origin, flush=True)
+        # Browsers share cookies across ports, even when two launchers run separate classrooms.
+        server.teacher_cookie_name = f"teacher_session_{server.server_port}" if launch_teacher else "teacher_session"
+        server.teacher_launch = None
+        server.browser_open_failed = False
+        if launch_teacher:
+            server.teacher_launch = TeacherLaunch(credentials.issue())
+            open_teacher_browser(server)
+        else:
+            print(server.origin, flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            pass
+            return
+        if server.browser_open_failed:
+            raise SystemExit("SiMetropolis Edu couldn't open your default browser.")

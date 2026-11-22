@@ -2,9 +2,13 @@
 
 import argparse
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 from .state import TeacherCredentials
+
+
+DEFAULT_CLASS_DURATION_SECONDS = 45 * 60
 
 
 def origin(value):
@@ -29,16 +33,25 @@ def main():
     parser.add_argument("--data-dir", type=Path, default=Path("classroom/.data"))
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("issue-teacher-credential", help="Print a new teacher credential")
+    commands.add_parser("launch", help="Open private lesson preparation on this computer")
     serve = commands.add_parser("serve", help="Serve the classroom")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8899)
     serve.add_argument("--public-url", type=origin, help="Origin that group devices use")
-    serve.add_argument("--duration-seconds", type=int, default=45 * 60)
+    serve.add_argument("--duration-seconds", type=int, default=DEFAULT_CLASS_DURATION_SECONDS)
     args = parser.parse_args()
-    credentials = TeacherCredentials(args.data_dir / "teachers")
     if args.command == "issue-teacher-credential":
-        print(credentials.issue())
+        print(TeacherCredentials(args.data_dir / "teachers").issue())
         return
+
+    if args.command == "launch":
+        from .server import run
+
+        with TemporaryDirectory(prefix="simetropolis-edu-") as data:
+            run("127.0.0.1", 0, None, DEFAULT_CLASS_DURATION_SECONDS,
+                TeacherCredentials(Path(data) / "teachers"), launch_teacher=True)
+        return
+
     if not 0 <= args.port <= 65535 or args.duration_seconds < 1:
         serve.error("Use a port from 0 to 65535 and a positive class duration")
     if args.host != "127.0.0.1" and args.public_url is None:
@@ -46,7 +59,8 @@ def main():
 
     from .server import run
 
-    run(args.host, args.port, args.public_url, args.duration_seconds, credentials)
+    run(args.host, args.port, args.public_url, args.duration_seconds,
+        TeacherCredentials(args.data_dir / "teachers"))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,30 @@
 # Long Valley classroom
 
-Run these commands from the repository root with Python 3.9 or newer.
+On a prepared computer, double-click **Open SiMetropolis Edu** (`.command` on Mac, `.cmd` on Windows). The default browser opens lesson preparation, including when the computer is disconnected. Choose English or 繁體中文, then click **Start class** when you are ready. Keep the launcher window open while using the classroom.
+
+If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
+
+### Prepare a local checkout
+
+The shortcuts use a Python 3.9 or newer virtual environment named `.venv` beside the launchers. To prepare a checkout for testing, run the commands for your platform from the repository root.
+
+Mac:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r classroom/requirements.txt
+```
+
+Windows:
+
+```bat
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r classroom\requirements.txt
+```
+
+### Manual server setup
+
+The shortcuts use a loopback address. To test with separate devices on the classroom network, use the manual setup and LAN options below. Run these commands from the repository root with Python 3.9 or newer.
 
 ```sh
 python3 -m venv /tmp/long-valley-venv
@@ -41,6 +65,8 @@ node --test tools/check_long_valley.mjs
 ```
 
 The tests launch an isolated loopback classroom and use independent browser contexts for teachers and groups. They verify that only the class teacher can load the projection and its QR image. They decode the QR, join both sites, and exercise both languages. They also check manual ending, expiry, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
+
+The launcher checks open the default-browser URL in Chromium with loopback access, exercise language selection before the teacher starts class, and verify that a second browser cannot reuse the private sign-in link. The shortcut check installs `classroom/requirements.txt` into a temporary package's own virtual environment, then runs the local platform's launcher from a folder with spaces in its name. For an offline test run, download the wheels beforehand with `python -m pip download -r classroom/requirements.txt -d wheels`. Set `PIP_NO_INDEX=1` and `PIP_FIND_LINKS` to the absolute path of that wheels directory when running the tests.
 
 The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
 
