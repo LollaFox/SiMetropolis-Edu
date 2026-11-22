@@ -257,3 +257,216 @@ test('an expired Traditional Chinese class closes for joined groups and rejects 
   await group.getByRole('button', { name: 'Find class' }).click();
   await group.getByRole('heading', { name: 'This class is closed' }).waitFor();
 });
+
+async function startInvestigation(t) {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const teacher = await participant(browser);
+  await openClass(teacher, origin, issueCredential());
+  const projector = await openProjection(teacher);
+  const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+
+  async function groupAt(site) {
+    const group = await participant(browser);
+    await group.goto(joinUrl);
+    await group.getByRole('button', { name: `Choose Site ${site}` }).click();
+    await group.getByRole('heading', { name: `Site ${site}:`, exact: false }).waitFor();
+    return group;
+  }
+
+  return { groupAt };
+}
+
+test('both groups can draw a different alignment between the same two stations', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  for (const site of ['A', 'B']) {
+    const group = await groupAt(site);
+    const alignment = group.getByLabel('Railway alignment');
+    const map = group.getByRole('group', { name: 'Spring site map' });
+    assert.equal(await alignment.inputValue(), 'central');
+    const centralMap = await map.screenshot();
+
+    await alignment.selectOption({ label: 'Northern crossing' });
+    await group.getByRole('button', { name: 'Test crossing' }).click();
+    await map.getByText('West station', { exact: true }).waitFor();
+    await map.getByText('East station', { exact: true }).waitFor();
+    assert.equal(await alignment.inputValue(), 'north');
+    assert.ok(!centralMap.equals(await map.screenshot()), 'The chosen crossing must change the drawn map');
+  }
+});
+
+test('a tunnel shows tunnel entrances where an elevated crossing would show bridge supports', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const map = group.getByRole('group', { name: 'Spring site map' });
+  const key = group.getByRole('list', { name: 'Map key' });
+  await key.getByText('Bridge supports', { exact: true }).waitFor();
+  const supports = map.locator('rect.map-supports:visible');
+  const entrances = map.locator('rect.map-entrances:visible');
+  assert.equal(await supports.count(), 5);
+  assert.equal(await entrances.count(), 0);
+
+  await group.getByLabel('Crossing type').selectOption({ label: 'Tunnel' });
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  await key.getByText('Tunnel entrances', { exact: true }).waitFor();
+  assert.equal(await key.getByText('Bridge supports', { exact: true }).count(), 0);
+  assert.equal(await supports.count(), 0);
+  assert.equal(await entrances.count(), 2);
+});
+
+test('each striped map location opens its own evidence by pointer or keyboard', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await groupAt('A');
+  await group.setViewportSize({ width: 320, height: 800 });
+  await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption({ label: 'Valley approach' });
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+
+  for (const labels of [
+    { map: 'Spring site map', access: 'Inspect overlap for Construction access route',
+      supports: 'Inspect overlap for Bridge supports', accessEvidence: 'Construction access route overlaps modelled nesting habitat.',
+      supportEvidence: 'Bridge supports overlap modelled nesting habitat.' },
+    { map: '春季場地地圖', access: '查看施工通道的重疊範圍', supports: '查看橋墩的重疊範圍',
+      accessEvidence: '施工通道與模型中的築巢生境重疊。', supportEvidence: '橋墩與模型中的築巢生境重疊。' },
+  ]) {
+    if (labels.map === '春季場地地圖') await group.getByRole('button', { name: '繁體中文' }).click();
+    const map = group.getByRole('group', { name: labels.map });
+    const access = map.getByRole('link', { name: labels.access });
+    const supports = map.getByRole('link', { name: labels.supports });
+    assert.equal(await map.getByRole('link').count(), 2);
+
+    // At this width the left edge of the access stripe is near the bridge support.
+    await access.scrollIntoViewIfNeeded();
+    const stripe = await access.boundingBox();
+    await group.mouse.click(stripe.x + stripe.width * 0.05, stripe.y + stripe.height / 2);
+    const selected = group.locator('li:target:focus');
+    await selected.filter({ hasText: labels.accessEvidence }).waitFor();
+
+    await access.focus();
+    await group.keyboard.press('Tab');
+    assert.ok(await supports.evaluate(link => link === document.activeElement));
+    await group.keyboard.press('Enter');
+    await selected.filter({ hasText: labels.supportEvidence }).waitFor();
+  }
+});
+
+test('the same access route can overlap nesting habitat at one site and clear it at the other', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const groupA = await groupAt('A');
+  const groupB = await groupAt('B');
+  for (const group of [groupA, groupB]) {
+    await group.getByLabel('Crossing type').selectOption({ label: 'Tunnel' });
+    await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption({ label: 'Valley approach' });
+    await group.getByRole('button', { name: 'Test crossing' }).click();
+  }
+
+  const finding = groupA.getByText('Possible disturbance', { exact: true });
+  await finding.click();
+  await groupA.getByText('Construction access route overlaps modelled nesting habitat.', { exact: true }).waitFor();
+  await groupA.getByRole('list', { name: 'Map key' }).getByText('Footprint overlap', { exact: true }).waitFor();
+  const overlapMap = await groupA.getByRole('group', { name: 'Spring site map' }).screenshot();
+  await groupB.getByText('No modelled overlap', { exact: true }).waitFor();
+
+  await groupA.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption({ label: 'East approach' });
+  await groupA.getByRole('button', { name: 'Test crossing' }).click();
+  await groupA.getByText('No modelled overlap', { exact: true }).waitFor();
+  assert.equal(await finding.count(), 0);
+  assert.equal(await groupA.getByText('Footprint overlap', { exact: true }).count(), 0);
+  assert.ok(!overlapMap.equals(await groupA.getByRole('group', { name: 'Spring site map' }).screenshot()));
+  assert.equal(await groupB.getByRole('combobox', { name: 'Construction access route', exact: true }).inputValue(), 'valley');
+});
+
+test('the spring baseline hides the works while keeping the site, habitat, and proposal', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const map = group.getByRole('group', { name: 'Spring site map' });
+  const key = group.getByRole('list', { name: 'Map key' });
+  await group.getByLabel('Crossing type').selectOption({ label: 'Tunnel' });
+  await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption({ label: 'Valley approach' });
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  await group.getByText('Possible disturbance', { exact: true }).waitFor();
+  const proposedMap = await map.screenshot();
+
+  await group.getByRole('button', { name: 'Without proposed works' }).click();
+  await group.getByText('Spring baseline', { exact: true }).waitFor();
+  await key.getByText('Modelled nesting habitat', { exact: true }).waitFor();
+  await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  assert.equal(await key.getByText('Tunnel entrances', { exact: true }).count(), 0);
+  await map.getByText('Wetland', { exact: true }).waitFor();
+  assert.equal(await group.getByText('Possible disturbance', { exact: true }).count(), 0);
+  assert.ok(!proposedMap.equals(await map.screenshot()));
+
+  await group.getByRole('button', { name: 'With proposed works' }).click();
+  await group.getByText('Possible disturbance', { exact: true }).click();
+  await group.getByText('Construction access route overlaps modelled nesting habitat.', { exact: true }).waitFor();
+  await key.getByText('Tunnel entrances', { exact: true }).waitFor();
+});
+
+async function testNorthernTunnelAtSiteB(groupAt) {
+  const group = await groupAt('B');
+  await group.getByLabel('Railway alignment').selectOption({ label: 'Northern crossing' });
+  await group.getByLabel('Crossing type').selectOption({ label: 'Tunnel' });
+  await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption({ label: 'Valley approach' });
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  return group;
+}
+
+test('replaying the last proposal from the baseline reproduces its visible evidence', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await testNorthernTunnelAtSiteB(groupAt);
+  const finding = group.getByText('Possible disturbance', { exact: true });
+  const evidence = group.getByText('Construction access route overlaps modelled nesting habitat.', { exact: true });
+  await finding.click();
+  await evidence.waitFor();
+
+  await group.getByRole('button', { name: 'Without proposed works' }).click();
+  await group.getByText('Spring baseline', { exact: true }).waitFor();
+  await group.getByRole('button', { name: 'Replay crossing' }).click();
+  await group.getByRole('status').getByText('Crossing replayed.').waitFor();
+  await finding.click();
+  await evidence.waitFor();
+});
+
+test('reset restores the opening design at the group’s assigned site', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await testNorthernTunnelAtSiteB(groupAt);
+  await group.getByLabel('Railway alignment').selectOption({ label: 'Southern crossing' });
+  await group.getByRole('button', { name: 'Without proposed works' }).click();
+  assert.equal(await group.getByLabel('Railway alignment').inputValue(), 'south');
+  await group.getByRole('button', { name: 'Reset crossing' }).click();
+  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  await group.getByText('No modelled overlap', { exact: true }).waitFor();
+  assert.equal(await group.getByLabel('Railway alignment').inputValue(), 'central');
+  assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
+  assert.equal(await group.getByRole('combobox', { name: 'Construction access route', exact: true }).inputValue(), 'east');
+});
+
+test('switching language preserves the untested draft, baseline and last tested crossing', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await testNorthernTunnelAtSiteB(groupAt);
+  await group.getByRole('button', { name: 'Without proposed works' }).click();
+  await group.getByLabel('Railway alignment').selectOption({ label: 'Southern crossing' });
+  await group.getByLabel('Crossing type').selectOption({ label: 'Elevated railway' });
+  await group.getByRole('combobox', { name: 'Construction access route', exact: true }).selectOption({ label: 'East approach' });
+  await group.getByRole('button', { name: '繁體中文' }).click();
+
+  await group.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
+  assert.equal(await group.locator('html').getAttribute('lang'), 'zh-Hant');
+  assert.equal(await group.getByLabel('鐵路走線').inputValue(), 'south');
+  assert.equal(await group.getByLabel('鐵路形式').inputValue(), 'elevated');
+  assert.equal(await group.getByRole('combobox', { name: '施工通道', exact: true }).inputValue(), 'east');
+  await group.getByText('春季基準', { exact: true }).waitFor();
+  await group.getByRole('group', { name: '春季場地地圖' }).getByText('西面車站', { exact: true }).waitFor();
+
+  await group.getByRole('button', { name: '重播走線測試' }).click();
+  await group.getByText('可能造成滋擾', { exact: true }).click();
+  await group.getByText('施工通道與模型中的築巢生境重疊。', { exact: true }).waitFor();
+  await group.getByText('春季模型如何判斷？', { exact: true }).click();
+  await group.getByRole('link', { name: '塱原自然生態公園四季指南' }).waitFor();
+  await group.getByRole('button', { name: 'English' }).click();
+  await group.getByText('Possible disturbance', { exact: true }).waitFor();
+  assert.equal(await group.getByLabel('Railway alignment').inputValue(), 'south');
+  assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
+  assert.equal(await group.getByRole('combobox', { name: 'Construction access route', exact: true }).inputValue(), 'east');
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  await group.getByText('No modelled overlap', { exact: true }).waitFor();
+  await group.getByRole('list', { name: 'Map key' }).getByText('Bridge supports', { exact: true }).waitFor();
+});

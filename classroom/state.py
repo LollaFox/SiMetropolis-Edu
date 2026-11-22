@@ -6,6 +6,8 @@ import secrets
 from threading import Lock
 from time import monotonic
 
+from .investigation import Design
+
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LENGTH = 8
@@ -35,6 +37,9 @@ class TeacherCredentials:
 class Group:
     site: str
     language: str
+    draft_design: Design = field(default_factory=Design)
+    tested_design: Design = field(default_factory=Design)
+    show_works: bool = True
 
 
 @dataclass

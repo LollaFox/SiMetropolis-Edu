@@ -12,6 +12,7 @@ import qrcode
 from qrcode.image.pure import PyPNGImage
 
 from . import views
+from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
 from .state import Classroom
 
 
@@ -118,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(410, views.unavailable(language, join_code=code))
             group = session.groups.get(self.cookie_value("group_session"))
             if group:
-                return Response(200, views.group_opening(session, group))
+                return Response(200, views.group_opening(session, group, notice=fields.get("notice", [""])[0]))
             return Response(200, views.choose_site(session, taken="taken" in fields))
         if path.startswith("/classes/"):
             code, _, action = path.removeprefix("/classes/").partition("/")
@@ -201,13 +202,41 @@ class Handler(BaseHTTPRequestHandler):
                 return self.redirect(f"{join_path}&taken=1")
             cookie = self.session_cookie("group_session", token, f"/join/{code}")
             return self.redirect(join_path, cookie)
-        if action == "language" and group:
+        if group is None or action not in {"language", "design", "view"}:
+            return Response(404)
+
+        draft = group.draft_design
+        if action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}:
+            alignment = fields.get("alignment", [""])[0]
+            crossing_type = fields.get("crossing_type", [""])[0]
+            access_route = fields.get("access", [""])[0]
+            if (alignment not in ALIGNMENTS or crossing_type not in CROSSING_TYPES
+                    or access_route not in ACCESS_ROUTES):
+                return Response(400)
+            draft = Design(alignment, crossing_type, access_route)
+
+        destination = f"{join_path}#spring-comparison"
+        if action == "language":
             preferred = fields.get("language", [""])[0]
             if preferred not in views.LANGUAGES:
                 return Response(400)
             group.language = preferred
-            return self.redirect(join_path)
-        return Response(404)
+            destination = join_path
+        elif action == "design":
+            group.tested_design = draft
+            group.show_works = True
+        else:
+            view = fields.get("view", [""])[0]
+            if view not in {"proposed", "baseline", "replay", "reset"}:
+                return Response(400)
+            group.show_works = view != "baseline"
+            if view == "reset":
+                draft = group.tested_design = Design()
+                destination = f"{join_path}#spring-investigation"
+            elif view == "replay":
+                destination = f"{join_path}&notice=replayed#spring-comparison"
+        group.draft_design = draft
+        return self.redirect(destination)
 
 
 def run(host, port, public_url, duration_seconds, credentials):

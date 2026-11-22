@@ -3,6 +3,8 @@
 from html import escape
 from urllib.parse import quote
 
+from .investigation_views import spring_investigation
+from .localization import words
 from .state import CODE_LENGTH, SITES
 
 
@@ -43,22 +45,13 @@ COPY = {
     "B": ("Site B: Riverside wetland", "場地 B：河畔濕地"),
     "site_A": ("The wetland sits in the middle of the valley.", "濕地位於河谷中央。"),
     "site_B": ("The wetland sits closer to the river, on the north side of the valley.", "濕地位於河谷北面，較接近河道。"),
-    "station_west": ("West station", "西面車站"),
-    "station_east": ("East station", "東面車站"),
-    "wetland": ("Wetland", "濕地"),
-    "river": ("River", "河道"),
     "unavailable": ("This class is closed", "這個課堂已結束"),
     "unavailable_help": ("Ask your teacher for the current join link or code.", "請向老師索取目前課堂的加入連結或代碼。"),
 }
 
 
-def words(language):
-    index = int(language == "zh-Hant")
-    return {key: pair[index] for key, pair in COPY.items()}
-
-
 def page(language, title, content, *, layout="", session=None):
-    name = words(language)["name"]
+    name = words(language, COPY)["name"]
     status = f' data-class-status="/classes/{session.code}/status"' if session else ""
     script = '<script src="/class-status.js" defer></script>' if session else ""
     return f"""<!doctype html>
@@ -88,13 +81,12 @@ def language_link(path, language):
 
 def language_button(path, language):
     alternate = alternate_language(language)
-    return f"""<form class="language" action="{path}?lang={language}" method="post">
-  <button class="secondary" name="language" value="{alternate}" lang="{alternate}">{LANGUAGES[alternate]}</button>
-</form>"""
+    return f"""<button class="language secondary" form="crossing-design" formaction="{path}?lang={language}"
+  name="language" value="{alternate}" lang="{alternate}">{LANGUAGES[alternate]}</button>"""
 
 
 def home(language):
-    t = words(language)
+    t = words(language, COPY)
     return page(language, t["name"], f"""
 <section class="panel">
   <h1>{t["name"]}</h1>
@@ -105,7 +97,7 @@ def home(language):
 
 
 def sign_in(language, invalid=False):
-    t = words(language)
+    t = words(language, COPY)
     error = f'<p class="alert" role="alert">{t["bad_credential"]}</p>' if invalid else ""
     return page(language, t["teacher_entry"], f"""
 <section class="panel">
@@ -121,7 +113,7 @@ def sign_in(language, invalid=False):
 
 
 def teacher(language, session=None):
-    t = words(language)
+    t = words(language, COPY)
     sign_out = f"""<form class="inline" action="/teacher/sign-out?lang={language}" method="post">
   <button class="secondary">{t["sign_out"]}</button>
 </form>"""
@@ -157,7 +149,7 @@ def teacher(language, session=None):
 
 def projection(session, url):
     language = session.language
-    t = words(language)
+    t = words(language, COPY)
     code_entry = escape(url.rsplit("/", 1)[0], quote=True)
     return page(language, t["join_title"], f"""
 <section class="panel projection">
@@ -174,7 +166,7 @@ def projection(session, url):
 
 
 def find_class(language):
-    t = words(language)
+    t = words(language, COPY)
     return page(language, t["join_title"], f"""
 <section class="panel">
   <h1>{t["join_title"]}</h1>
@@ -190,7 +182,7 @@ def find_class(language):
 
 
 def unavailable(language, *, join_code=None):
-    t = words(language)
+    t = words(language, COPY)
     switch = ""
     if join_code is not None:
         switch = language_link(f"/join/{quote(join_code, safe='')}", language)
@@ -205,7 +197,7 @@ def unavailable(language, *, join_code=None):
 
 def choose_site(session, taken=False):
     language = session.language
-    t = words(language)
+    t = words(language, COPY)
     occupied = session.occupied_sites()
     alert = f'<p class="alert" role="alert">{t["choose_again"]}</p>' if taken else ""
     cards = []
@@ -230,10 +222,9 @@ def choose_site(session, taken=False):
 </section>""", layout="wide", session=session)
 
 
-def group_opening(session, group):
+def group_opening(session, group, *, notice=""):
     language, site = group.language, group.site
-    t = words(language)
-    map_description = f'{t["site_" + site]} {t["station_west"]} · {t["station_east"]}'
+    t = words(language, COPY)
     return page(language, t["puzzle"], f"""
 <section class="panel">
   <div class="opening">
@@ -245,11 +236,6 @@ def group_opening(session, group):
     <p class="site-note">{t["imagined"]}</p>
     <h2>{t[site]}</h2>
     <p>{t["site_" + site]}</p>
-    <div class="site-map site-{site.lower()}" role="img" aria-label="{escape(map_description, quote=True)}">
-      <span class="river">{t["river"]}</span>
-      <span class="wetland">{t["wetland"]}</span>
-      <span class="station west">{t["station_west"]}</span>
-      <span class="station east">{t["station_east"]}</span>
-    </div>
+    {spring_investigation(session, group, notice)}
   </section>
 </section>""", layout="wide", session=session)
