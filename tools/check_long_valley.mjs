@@ -5,10 +5,12 @@ import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
 import { networkInterfaces, tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+import { downloadConnection, extractWindowsDownload, retryWindowsDownload } from './tests/windows-download.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
@@ -17,13 +19,21 @@ const python = process.env.PYTHON || 'python3';
 const lanAddresses = Object.values(networkInterfaces()).flat()
   .filter(({ family, internal }) => family === 'IPv4' && !internal).map(({ address }) => address);
 const lanTest = { timeout: 30000, skip: !lanAddresses.length && 'Needs a connected IPv4 interface' };
-const nativeShortcut = { darwin: 'Open SiMetropolis Edu.command', win32: 'Open SiMetropolis Edu.cmd' }[process.platform];
+const hasNativeShortcut = process.platform === 'darwin' || process.platform === 'win32';
 
-async function openClassroomBrowser(t, child, closed, browser) {
+async function openClassroomBrowser(t, child, closed, browser, timeout = 10000) {
   const output = createInterface({ input: child.stdout });
+  const setupMessages = [];
+  output.on('line', line => {
+    if (/^(Setting up SiMetropolis Edu|Downloading )/.test(line)) setupMessages.push(line);
+    else output.emit('launch-url', line);
+  });
   function nextLaunchUrl() {
     return Promise.race([
-      once(output, 'line', { signal: AbortSignal.timeout(10000) }).then(([line]) => new URL(line)),
+      once(output, 'launch-url', { signal: AbortSignal.timeout(timeout) }).then(([line]) => {
+        if (line.startsWith('SiMetropolis Edu could not open.')) throw new Error(line);
+        return new URL(line);
+      }),
       closed.then(([code]) => { throw new Error(`Classroom exited with code ${code} before reporting its URL`); }),
     ]);
   }
@@ -32,7 +42,7 @@ async function openClassroomBrowser(t, child, closed, browser) {
     browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, timeout: 10000 });
     t.after(() => browser.close());
   }
-  return { browser, launchUrl, nextLaunchUrl };
+  return { browser, launchUrl, nextLaunchUrl, setupMessages };
 }
 
 async function classroom(t, ...options) {
@@ -57,35 +67,46 @@ async function classroom(t, ...options) {
 }
 
 async function prepareShortcut(temporary, env) {
-  const packageRoot = join(temporary, 'SiMetropolis Edu');
-  await cp(new URL('classroom/', root), join(packageRoot, 'classroom'), {
-    recursive: true,
-    filter: (path) => !['.data', '.DS_Store', '__pycache__'].includes(basename(path)),
-  });
-  const script = join(packageRoot, nativeShortcut);
-  await cp(new URL(nativeShortcut, root), script);
+  let script;
+  if (process.platform === 'win32') {
+    script = await extractWindowsDownload(temporary);
+  } else {
+    const folder = join(temporary, 'SiMetropolis Edu');
+    await cp(new URL('classroom/', root), join(folder, 'classroom'), {
+      recursive: true,
+      filter: (path) => !['.data', '.DS_Store', '__pycache__'].includes(basename(path)),
+    });
+    script = join(folder, 'Open SiMetropolis Edu.command');
+    await cp(new URL('Open SiMetropolis Edu.command', root), script);
+  }
+  const packageRoot = dirname(script);
   const setup = { cwd: packageRoot, env };
   execFileSync(python, ['-I', '-m', 'venv', '.venv'], setup);
   const interpreter = process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python';
+  const requirements = fileURLToPath(new URL('classroom/requirements.txt', root));
   execFileSync(join(packageRoot, '.venv', interpreter),
-    ['-I', '-m', 'pip', '--disable-pip-version-check', 'install', '-r', 'classroom/requirements.txt'], setup);
+    ['-I', '-m', 'pip', '--disable-pip-version-check', 'install', '-r', requirements], setup);
   return script;
 }
 
-async function launchClassroom(t, { shortcut = false, browser, delayedProfile = false } = {}) {
+async function launchClassroom(t, { shortcut = false, windowsScript, browser, delayedProfile = false,
+  env = {}, retryDownload = false } = {}) {
   const temporary = await mkdtemp(join(tmpdir(), 'long-valley-launch-'));
   let launcher;
   let closed;
-  t.after(async () => {
+  async function stop() {
     if (launcher?.pid && launcher.exitCode === null && launcher.signalCode === null) {
-      if (shortcut && process.platform === 'win32') {
-        const stop = spawn('taskkill.exe', ['/pid', String(launcher.pid), '/t', '/f'], { stdio: 'ignore' });
-        await once(stop, 'close');
+      if ((shortcut || windowsScript) && process.platform === 'win32') {
+        const kill = spawn('taskkill.exe', ['/pid', String(launcher.pid), '/t', '/f'], { stdio: 'ignore' });
+        await once(kill, 'close');
       } else {
         launcher.kill();
       }
     }
     await closed?.catch(() => {});
+  }
+  t.after(async () => {
+    await stop();
     await rm(temporary, { recursive: true, force: true });
   });
   const browserCommand = join(temporary, 'open-browser.mjs');
@@ -104,14 +125,14 @@ try {
   const browserOverride = [process.execPath, browserCommand].map((path) => `"${path.replaceAll('\\', '/')}"`);
   const options = {
     cwd: root, stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, TMPDIR: temporary, TEMP: temporary, BROWSER: `${browserOverride.join(' ')} %s` },
+    env: { ...process.env, ...env, TMPDIR: temporary, TEMP: temporary, BROWSER: `${browserOverride.join(' ')} %s` },
   };
   let command = python;
   let args = ['-B', '-m', 'classroom', 'launch'];
-  if (shortcut) {
+  if (windowsScript || shortcut) {
     options.env.PYTHONPATH = '';
-    const script = await prepareShortcut(temporary, options.env);
     options.cwd = temporary;
+    const script = windowsScript || await prepareShortcut(temporary, options.env);
     if (process.platform === 'win32') {
       command = 'cmd.exe';
       args = ['/d', '/s', '/c', `""${script}""`];
@@ -131,9 +152,21 @@ with patch('classroom.server.monotonic', new=lambda: next(clock, 121)):
     main()
 `, 'launch'];
   }
+  if (windowsScript) options.stdio[2] = 'pipe';
   launcher = spawn(command, args, options);
   closed = once(launcher, 'close');
-  return openClassroomBrowser(t, launcher, closed, browser);
+  let progress = '';
+  if (windowsScript) launcher.stderr.on('data', chunk => { progress += chunk; });
+  const retry = new AbortController();
+  try {
+    const [result] = await Promise.all([
+      openClassroomBrowser(t, launcher, closed, browser, retryDownload ? 180000 : 10000),
+      retryDownload && retryWindowsDownload(launcher.pid, retry.signal),
+    ]);
+    return { ...result, stop, progress };
+  } finally {
+    retry.abort();
+  }
 }
 
 async function openClass(page, origin, credential, language = 'English') {
@@ -210,7 +243,7 @@ async function startConnectedClass(teacher, launchUrl, language) {
 }
 
 test('a connected English class projects a LAN link that a group can use', lanTest, async (t) => {
-  const { browser, launchUrl } = await launchClassroom(t, { shortcut: Boolean(nativeShortcut) });
+  const { browser, launchUrl } = await launchClassroom(t, { shortcut: hasNativeShortcut });
   const teacher = await participant(browser);
   await startConnectedClass(teacher, launchUrl, 'English');
   const projector = await openProjection(teacher);
@@ -306,13 +339,47 @@ test('the prepared launcher opens lesson preparation with only a loopback connec
 });
 
 test('Open SiMetropolis Edu runs from a prepared folder with spaces', {
-  skip: !nativeShortcut,
+  skip: !hasNativeShortcut,
   timeout: 30000,
 }, async (t) => {
   const { browser, launchUrl } = await launchClassroom(t, { shortcut: true });
   const teacher = await participant(browser);
   await teacher.goto(launchUrl.href);
   await teacher.getByRole('button', { name: 'Start class' }).waitFor();
+});
+
+test('the Windows download retries interrupted setup and reopens lesson preparation offline', {
+  skip: process.platform !== 'win32'
+    || (process.env.WINDOWS_DOWNLOAD_TEST !== '1' && 'Set WINDOWS_DOWNLOAD_TEST=1 for live first-use setup'),
+  timeout: 240000,
+}, async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), 'long-valley-windows-'));
+  try {
+    const windowsScript = await extractWindowsDownload(temporary);
+    const connection = await downloadConnection(t);
+    const first = await launchClassroom(t, { windowsScript, env: connection.env, retryDownload: true });
+    assert.ok(connection.interrupted, 'A required download was interrupted after receiving bytes');
+    assert.match(first.progress, /#+|\d+(\.\d+)?%/, 'The launcher displayed download progress');
+    const teacher = await participant(first.browser);
+    await teacher.goto(first.launchUrl.href);
+    await teacher.waitForURL(`${first.launchUrl.origin}/teacher`);
+    await teacher.getByRole('button', { name: 'Start class' }).waitFor();
+    await first.stop();
+
+    connection.offline = true;
+    const offline = await launchClassroom(t, { windowsScript, env: connection.env, browser: first.browser });
+    assert.equal(connection.offlineAttempts, 0, 'The installed launcher should open without requesting components');
+    assert.deepEqual(offline.setupMessages, []);
+    const returning = await participant(offline.browser);
+    await returning.route('**/*', route => new URL(route.request().url()).origin === offline.launchUrl.origin
+      ? route.continue() : route.abort());
+    await returning.goto(offline.launchUrl.href);
+    await returning.waitForURL(`${offline.launchUrl.origin}/teacher`);
+    await returning.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor();
+  } finally {
+    // Registered after the launcher hooks so even a failed launch releases its runtime first.
+    t.after(() => rm(temporary, { recursive: true, force: true }));
+  }
 });
 
 test('a slow browser profile selection opens a fresh private teacher tab', { timeout: 30000 }, async (t) => {

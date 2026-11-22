@@ -1,12 +1,16 @@
 # Long Valley classroom
 
-On a prepared computer, double-click **Open SiMetropolis Edu** (`.command` on Mac, `.cmd` on Windows). The default browser opens lesson preparation, including when the computer is disconnected. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
+On Windows, extract `SiMetropolis-Edu-Windows.zip` to a local folder and double-click **Open SiMetropolis Edu**. Keep the computer connected to the internet for first-use setup. The launcher shows download progress and offers **Retry** if a download is interrupted. After setup, you can open the same copy while disconnected.
+
+On a prepared Mac, double-click **Open SiMetropolis Edu** (`.command`).
+
+The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
 If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
 
 ### Prepare a local checkout
 
-The shortcuts use a Python 3.9 or newer virtual environment named `.venv` beside the launchers. To prepare a checkout for testing, run the commands for your platform from the repository root.
+The shortcuts can use a Python 3.9 or newer virtual environment named `.venv` beside the launchers. Windows sets up a private runtime in `runtime/windows` when it needs one. To prepare a checkout for testing with your own Python, run the commands for your platform from the repository root.
 
 Mac:
 
@@ -21,6 +25,10 @@ Windows:
 py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r classroom\requirements.txt
 ```
+
+### Build the Windows download
+
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-windows-download.ps1` from the repository root. The release asset is `dist/SiMetropolis-Edu-Windows.zip`. It contains the classroom and its launcher. The launcher downloads the embeddable Python archive and pure Python wheels pinned in `tools/windows-classroom-components.json`. Update those wheel pins when changing the classroom dependencies.
 
 ### Manual server setup
 
@@ -70,7 +78,16 @@ The connected-class tests start the prepared launcher and use separate browser s
 
 To verify a classroom network, open the shortcut on the teacher’s computer and join from a second device on the same Wi-Fi or Ethernet. In an English class, follow the projected link and choose Site A. Start another class in 繁體中文, scan the QR and choose 場地 A, then use a fresh browser session on the student device to enter the short code and choose 場地 B.
 
-The launcher checks open the default-browser URL in Chromium with loopback access, exercise language selection before the teacher starts class, and verify that a second browser cannot reuse the private sign-in link. The shortcut check installs `classroom/requirements.txt` into a temporary package's own virtual environment, then runs the local platform's launcher from a folder with spaces in its name. For an offline test run, download the wheels beforehand with `python -m pip download -r classroom/requirements.txt -d wheels`. Set `PIP_NO_INDEX=1` and `PIP_FIND_LINKS` to the absolute path of that wheels directory when running the tests.
+The launcher checks open the private sign-in link in Chromium, exercise language selection before class, and verify that a second browser cannot reuse the link.
+
+On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. The test builds and extracts the teacher ZIP, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then stops the launcher and reopens the same package with component downloads blocked.
+
+```powershell
+$env:WINDOWS_DOWNLOAD_TEST = '1'
+node --test --test-name-pattern="Windows download" tools/check_long_valley.mjs
+```
+
+The prepared-shortcut checks on Mac and Windows use a temporary virtual environment. To run those checks offline, download the wheels beforehand with `python -m pip download -r classroom/requirements.txt -d wheels`. Set `PIP_NO_INDEX=1` and set `PIP_FIND_LINKS` to the wheel directory's file URL, for example `file:///C:/classroom%20tests/wheels`.
 
 The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
 
