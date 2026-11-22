@@ -55,10 +55,9 @@ class TeacherLaunch:
         return secrets.compare_digest(self._authorization, authorization.encode())
 
     def issue_ticket(self):
-        now = monotonic()
-        self._tickets = {ticket: expires for ticket, expires in self._tickets.items() if expires > now}
+        # A profile chooser can return after expiry. Keep its ticket until it requests its one renewal.
         ticket = secrets.token_urlsafe(32)
-        self._tickets[ticket] = now + 120
+        self._tickets[ticket] = monotonic() + 120
         return ticket
 
     def is_only_pending(self, ticket):

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shlex
 import shutil
 import signal
@@ -91,7 +92,21 @@ class MacClassroomPackageTests(unittest.TestCase):
             runtime_directory = application_support / "org.simetropolis.edu" / ("runtime-" + runtime["sha256"])
             self.assertTrue((runtime_directory / "python/bin/python3").is_file(), "Runtime escaped the test home")
         with self.launch_app() as browser_url:
-            self.assert_lesson_preparation(browser_url)
+            browser, origin = self.assert_lesson_preparation(browser_url)
+            start = Request(origin + "/teacher/start", urlencode({"language": "en"}).encode(),
+                            headers={"Origin": origin})
+            with browser.open(start, timeout=5) as response:
+                class_code = re.search(rb'name="code" value="([A-Z0-9]+)"', response.read()).group(1)
+            original = browser_url.rename(self.folder / "original-browser-url")
+            try:
+                # Finder delivers a reopen event to the running app.
+                subprocess.run(["/usr/bin/open", self.app], check=True)
+                reopened, same_origin = self.open_teacher_link(browser_url)
+                self.assertEqual(same_origin, origin)
+                with reopened.open(origin + "/teacher", timeout=5) as response:
+                    self.assertIn(b'name="code" value="' + class_code + b'"', response.read())
+            finally:
+                original.replace(browser_url)  # Teardown checks the original service PID.
 
     @contextmanager
     def launch_app(self):
@@ -104,7 +119,8 @@ class MacClassroomPackageTests(unittest.TestCase):
                           f'mv {pending} {shlex.quote(str(browser_url))}\n')
         opener.chmod(0o700)
         subprocess.run(["/usr/bin/open", "-n", "--arch", platform.machine(), "--env", f"CFFIXED_USER_HOME={self.folder}",
-                        "--env", f"TMPDIR={self.folder}", "--env", f'BROWSER="{opener}" %s', self.app], check=True)
+                        "--env", f"TMPDIR={self.folder}", "--env", f"XDG_STATE_HOME={self.folder / 'state'}",
+                        "--env", f'BROWSER="{opener}" %s', self.app], check=True)
         try:
             yield browser_url
         finally:
@@ -121,7 +137,7 @@ class MacClassroomPackageTests(unittest.TestCase):
                             self.fail("The classroom still accepted connections after its launcher quit")
                         sleep(0.1)
 
-    def assert_lesson_preparation(self, browser_url):
+    def open_teacher_link(self, browser_url):
         deadline = monotonic() + 30
         while not browser_url.exists() and monotonic() < deadline:
             sleep(0.1)
@@ -135,8 +151,13 @@ class MacClassroomPackageTests(unittest.TestCase):
                          headers={"Origin": origin})
         with browser.open(launch, timeout=5) as response:
             self.assertEqual(response.status, 204)
-        with browser.open(entry._replace(path="/teacher", fragment="").geturl(), timeout=5) as response:
+        return browser, origin
+
+    def assert_lesson_preparation(self, browser_url):
+        browser, origin = self.open_teacher_link(browser_url)
+        with browser.open(origin + "/teacher", timeout=5) as response:
             self.assertIn(b"Start class", response.read())
+        return browser, origin
 
 
 def accepts_connection(port):

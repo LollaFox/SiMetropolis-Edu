@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
 import { networkInterfaces, tmpdir } from 'node:os';
@@ -20,6 +20,9 @@ const lanAddresses = Object.values(networkInterfaces()).flat()
   .filter(({ family, internal }) => family === 'IPv4' && !internal).map(({ address }) => address);
 const lanTest = { timeout: 30000, skip: !lanAddresses.length && 'Needs a connected IPv4 interface' };
 const hasNativeShortcut = process.platform === 'darwin' || process.platform === 'win32';
+let launcherProfile;
+test.before(async () => { launcherProfile = await mkdtemp(join(tmpdir(), 'long-valley-user-')); });
+test.after(async () => { if (launcherProfile) await rm(launcherProfile, { recursive: true, force: true }); });
 
 async function openClassroomBrowser(t, child, closed, browser, timeout = 10000) {
   const output = createInterface({ input: child.stdout });
@@ -93,6 +96,7 @@ async function launchClassroom(t, { shortcut = false, windowsScript, browser, de
   env = {}, retryDownload = false } = {}) {
   const temporary = await mkdtemp(join(tmpdir(), 'long-valley-launch-'));
   const launches = [];
+  let readOnlyClassroom;
   async function stop({ launcher, closed }) {
     if (launcher.pid && launcher.exitCode === null && launcher.signalCode === null) {
       if ((shortcut || windowsScript) && process.platform === 'win32') {
@@ -106,6 +110,7 @@ async function launchClassroom(t, { shortcut = false, windowsScript, browser, de
   }
   t.after(async () => {
     await Promise.all(launches.map(stop));
+    if (readOnlyClassroom) await chmod(readOnlyClassroom, 0o755);
     await rm(temporary, { recursive: true, force: true });
   });
   const browserCommand = join(temporary, 'open-browser.mjs');
@@ -124,7 +129,8 @@ try {
   const browserOverride = [process.execPath, browserCommand].map((path) => `"${path.replaceAll('\\', '/')}"`);
   const options = {
     cwd: root, stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, ...env, TMPDIR: temporary, TEMP: temporary, BROWSER: `${browserOverride.join(' ')} %s` },
+    env: { ...process.env, XDG_STATE_HOME: launcherProfile, LOCALAPPDATA: launcherProfile, ...env,
+      TMPDIR: temporary, TEMP: temporary, BROWSER: `${browserOverride.join(' ')} %s` },
   };
   let command = python;
   const launchArgs = ['--data-dir', join(temporary, 'data'), 'launch'];
@@ -133,6 +139,10 @@ try {
     options.env.PYTHONPATH = '';
     options.cwd = temporary;
     const script = windowsScript || await prepareShortcut(temporary, options.env);
+    if (process.platform === 'darwin') {
+      readOnlyClassroom = join(dirname(script), 'classroom');
+      await chmod(readOnlyClassroom, 0o555);
+    }
     if (process.platform === 'win32') {
       command = 'cmd.exe';
       args = ['/d', '/s', '/c', `""${script}""`];
@@ -388,8 +398,13 @@ test('the Windows download retries interrupted setup and reopens lesson preparat
   }
 });
 
-test('a slow browser profile selection opens a fresh private teacher tab', { timeout: 30000 }, async (t) => {
-  const { browser, launchUrl, nextLaunchUrl } = await launchClassroom(t, { delayedProfile: true });
+test('a slow browser profile selection renews its link after another launch', { timeout: 30000 }, async (t) => {
+  const { browser, launchUrl, nextLaunchUrl, relaunch } = await launchClassroom(t, { delayedProfile: true });
+  const later = await relaunch();
+  const teacher = await participant(browser);
+  await teacher.goto(later.launchUrl.href);
+  await teacher.getByRole('button', { name: 'Start class' }).click();
+  const code = await teacher.getByRole('button', { name: 'End class' }).getAttribute('value');
   const delayedTab = await participant(browser);
   const [renewedUrl] = await Promise.all([nextLaunchUrl(), delayedTab.goto(launchUrl.href)]);
   await delayedTab.getByText('Your sign-in link expired. Continue in the new teacher tab.').waitFor();
@@ -402,7 +417,7 @@ test('a slow browser profile selection opens a fresh private teacher tab', { tim
   assert.ok(renewedUrl.hash && renewedUrl.hash !== launchUrl.hash, 'The launcher must issue a fresh ticket');
   const newTab = await participant(browser);
   await newTab.goto(renewedUrl.href);
-  await newTab.getByRole('button', { name: 'Start class' }).waitFor();
+  assert.equal(await newTab.getByRole('button', { name: 'End class' }).getAttribute('value'), code);
 });
 
 test('a group browser cannot reuse the launcher sign-in or open the teacher projection', { timeout: 30000 }, async (t) => {
@@ -441,15 +456,16 @@ test('a group browser cannot reuse the launcher sign-in or open the teacher proj
   }
 });
 
-test('a second launcher preserves the first teacher session in the same browser', { timeout: 30000 }, async (t) => {
-  const first = await launchClassroom(t);
+test('a second installation preserves the first teacher session in the same browser', { timeout: 30000 }, async (t) => {
+  const options = { shortcut: hasNativeShortcut };
+  const first = await launchClassroom(t, options);
   const teacher = await participant(first.browser);
   await teacher.goto(first.launchUrl.href);
   await teacher.getByRole('button', { name: 'Start class' }).click();
   const endClass = teacher.getByRole('button', { name: 'End class' });
   const originalClass = await endClass.getAttribute('value');
 
-  const second = await launchClassroom(t, { browser: first.browser });
+  const second = await launchClassroom(t, { ...options, browser: first.browser });
   if (await teacher.getByRole('link', { name: 'Project join information' }).count()) {
     const projector = await openProjection(teacher);
     const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');

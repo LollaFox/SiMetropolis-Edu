@@ -1,16 +1,29 @@
 """Start or reopen one classroom for a prepared installation."""
 
 import errno
+from hashlib import sha256
 from http.client import HTTPConnection, HTTPException
 import os
 import re
 import secrets
+import sys
 from tempfile import TemporaryDirectory
 from pathlib import Path
 from time import monotonic, sleep
 import webbrowser
 
 from .state import TeacherCredentials
+
+
+def user_launcher_directory():
+    if os.name == "nt":
+        state = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local")
+    else:
+        state = Path(os.environ.get("XDG_STATE_HOME", ""))
+        if not state.is_absolute():
+            state = Path.home() / ("Library/Application Support" if sys.platform == "darwin" else ".local/state")
+    installation = os.path.normcase(str(Path(__file__).resolve().parent))
+    return state / "org.simetropolis.edu" / "launchers" / sha256(os.fsencode(installation)).hexdigest()
 
 
 def take_service_lock(lock):
@@ -57,7 +70,7 @@ def existing_browser_url(registration):
 def launch(data_dir, duration_seconds):
     from .server import run
 
-    directory = data_dir / "launcher"
+    directory = data_dir / "launcher" if data_dir is not None else user_launcher_directory()
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     registration = directory / "running"
 
