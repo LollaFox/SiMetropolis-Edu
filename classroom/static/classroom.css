@@ -25,6 +25,7 @@ button:hover, .button:hover { background: #103f33; }
 .alert { color: #962f21; }
 .code-label { margin-bottom: .2rem; font-weight: 650; }
 code { color: #153a30; font-size: clamp(1.9rem, 6vw, 4rem); font-weight: bold; letter-spacing: .12em; }
+.rejoin-code { font-size: clamp(1.2rem, 5vw, 2rem); white-space: nowrap; }
 .join-url { overflow-wrap: anywhere; }
 .projection { display: grid; grid-template-columns: 1fr minmax(11rem, 34%); gap: 1.75rem; align-items: center; }
 .join-qr { display: block; width: 100%; max-width: 22rem; background: white; border: 1px solid #c5d2bf; border-radius: .65rem; }

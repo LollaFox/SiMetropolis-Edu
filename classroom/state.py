@@ -45,14 +45,19 @@ class TeacherCredentials:
 
 @dataclass
 class Group:
-    site: str
+    starting_site: str
     language: str
+    rejoin_code: str = field(repr=False)
+    site: str = field(init=False)
     draft_design: Design = field(default_factory=Design)
     tested_design: Design = field(default_factory=Design)
     show_works: bool = True
     saved_design: Optional[Design] = None
     revision: int = 0
     rendered_comparisons: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.site = self.starting_site
 
     def capture_comparison(self):
         comparison = Comparison(self.site, self.tested_design)
@@ -84,12 +89,32 @@ class ClassSession:
     def occupied_sites(self):
         return {group.site for group in self.groups.values()}
 
+    def new_rejoin_code(self):
+        active_codes = {group.rejoin_code for group in self.groups.values()}
+        while True:
+            code = "-".join("".join(secrets.choice(CODE_ALPHABET) for _ in range(4)) for _ in range(3))
+            if code not in active_codes:
+                return code
+
     def take_site(self, site):
         if site not in SITES or site in self.occupied_sites():
             return None
         token = secrets.token_urlsafe(32)
-        self.groups[token] = Group(site, self.language)
+        self.groups[token] = Group(site, self.language, self.new_rejoin_code())
         return token
+
+    def rejoin_code_for(self, starting_site):
+        return next((g.rejoin_code for g in self.groups.values() if g.starting_site == starting_site), None)
+
+    def redeem_rejoin_code(self, entered_code):
+        code = entered_code.strip().upper().replace("-", "").replace(" ", "")
+        if not code.isascii():
+            return None
+        for token, group in self.groups.items():
+            if secrets.compare_digest(group.rejoin_code.replace("-", ""), code):
+                group.rejoin_code = self.new_rejoin_code()
+                return token
+        return None
 
     def share_comparison(self, comparison):
         record_comparison(self.comparisons, comparison)

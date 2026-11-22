@@ -10,6 +10,8 @@ The default browser opens lesson preparation. Choose English or 繁體中文, th
 
 If Edu loses the classroom network or you start while disconnected, the timer keeps running. Select **Open network settings** if you need to reconnect the computer. Edu retries automatically and restores the join information for the same class when it finds a usable address.
 
+If a returning group scans the restored QR and sees **Choose your starting site**, open **Help a group rejoin** in the private teacher tab. Select the site where the group **started**, even after **Pass the City**, and choose **Get group rejoin code**. Give the code privately to that group. On its device, the group enters the code and selects **Rejoin my group** to reopen its current site with its recorded crossing and chosen language. Each code works once. If the group needs another, select its starting site again to see the current code.
+
 If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
 
 ### Prepare a local checkout
@@ -82,7 +84,7 @@ The connected-class tests start the prepared launcher and use separate browser s
 
 To verify a classroom network, open the shortcut on the teacher’s computer and join from a second device on the same Wi-Fi or Ethernet. In an English class, follow the projected link and choose Site A. Start another class in 繁體中文, scan the QR and choose 場地 A, then use a fresh browser session on the student device to enter the short code and choose 場地 B.
 
-On Mac and Windows, verify recovery both before starting and during a lesson. Disconnect Wi-Fi and Ethernet, check that the timer keeps running and the join information is hidden, then use **Open network settings** to reconnect. Keep the teacher and projection tabs open. Check that the notice clears, the original code reappears, and the second device can join with the restored QR or link.
+On Mac and Windows, verify recovery both before starting and during a lesson. Disconnect Wi-Fi and Ethernet, check that the timer keeps running and the join information is hidden, then use **Open network settings** to reconnect. Keep the teacher and projection tabs open. Check that the notice clears, the original class code reappears, and the second device can join with the restored QR or link. To check a change of address during a lesson, have both groups save different crossings before disconnecting. After reconnecting, have each group scan the restored QR and rejoin with its individual code. Check both crossings and assigned sites.
 
 The launcher checks open the private sign-in link in Chromium, exercise language selection before class, and verify that a second browser cannot reuse the link.
 

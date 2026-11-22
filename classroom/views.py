@@ -68,6 +68,21 @@ COPY = {
     "choose": ("Choose Site {}", "選擇場地 {}"),
     "occupied": ("A group has taken this site.", "已有小組選擇這個場地。"),
     "choose_again": ("That site has been taken. Check which site is available.", "這個場地已有小組選擇。請查看哪些場地仍可選擇。"),
+    "help_rejoin": ("Help a group rejoin", "協助小組重新加入"),
+    "starting_site": ("Group’s starting site", "小組的起始場地"),
+    "site_name": ("Site {}", "場地 {}"),
+    "get_rejoin_code": ("Get group rejoin code", "取得小組重入碼"),
+    "rejoin_code": ("Group rejoin code", "小組重入碼"),
+    "give_rejoin_code": ("Privately give this one-use code to the group that started at Site {}.",
+                         "請私下把這個一次性重入碼交給從場地 {} 出發的小組。"),
+    "no_group": ("No group has started at Site {} yet.", "暫時未有小組從場地 {} 出發。"),
+    "back_to_teacher": ("Back to teacher view", "返回教師介面"),
+    "already_joined": ("Already joined this class?", "你們已加入這個課堂嗎？"),
+    "rejoin_help": ("Ask your teacher for your group rejoin code to return to your work.",
+                    "請向老師索取你們的小組重入碼，繼續先前的活動。"),
+    "rejoin": ("Rejoin my group", "返回我的小組"),
+    "invalid_rejoin": ("Check the group rejoin code with your teacher and try again.",
+                       "請向老師核對小組重入碼，然後再試一次。"),
     "puzzle": ("How would you get a railway across Long Valley?", "你會怎樣讓鐵路穿越塱原？"),
     "puzzle_help": ("The two stations are fixed. Look at where the wetland lies between them. Where might you cross, and what would you want to find out first?",
                     "兩個車站的位置已定。看看它們之間的濕地在哪裏。你會選擇從哪裏穿越？你最想先弄清楚甚麼？"),
@@ -198,6 +213,16 @@ def teacher(language, session=None, *, notice="", track_network=False, local_set
     <a class="button secondary" href="{comparison_url(session)}" target="_blank" rel="noopener">{t["shared_comparisons"]}</a>
   </div>
   {pass_the_city_controls(session, t, notice)}
+  <details>
+    <summary>{t["help_rejoin"]}</summary>
+    <form action="/teacher/rejoin/{session.code}" method="get">
+      <label for="starting-site">{t["starting_site"]}</label>
+      <select id="starting-site" name="site">
+        {''.join(f'<option value="{site}">{t["site_name"].format(site)}</option>' for site in SITES)}
+      </select>
+      <button class="secondary">{t["get_rejoin_code"]}</button>
+    </form>
+  </details>
   <div class="teacher-actions">
     <form class="inline" action="/teacher/end?lang={language}" method="post">
       <button class="end" name="code" value="{session.code}">{t["end"]}</button>
@@ -231,6 +256,21 @@ def pass_the_city_controls(session, t, notice):
 <form class="inline" action="/teacher/pass-the-city?lang={session.language}" method="post">
   <button name="code" value="{session.code}">{t["pass_the_city"]}</button>
 </form>"""
+
+
+def teacher_rejoin(session, site):
+    language = session.language
+    t = words(language, COPY)
+    code = session.rejoin_code_for(site)
+    message = t["give_rejoin_code" if code else "no_group"].format(site)
+    display = f'<p><code class="rejoin-code">{code}</code></p>' if code else ""
+    return page(language, t["rejoin_code"], f"""
+<section class="panel">
+  <h1>{t["rejoin_code"]}</h1>
+  <p>{message}</p>
+  {display}
+  <p><a href="/teacher?lang={language}">{t["back_to_teacher"]}</a></p>
+</section>""", session=session, teacher_only=True)
 
 
 def projection(session, url, *, track_network=False):
@@ -337,11 +377,22 @@ def unavailable(language, *, join_code=None):
 </section>""")
 
 
-def choose_site(session, taken=False):
+def choose_site(session, taken=False, invalid_rejoin=False):
     language = session.language
     t = words(language, COPY)
     occupied = session.occupied_sites()
     alert = f'<p class="alert" role="alert">{t["choose_again"]}</p>' if taken else ""
+    error = f'<p class="alert" role="alert">{t["invalid_rejoin"]}</p>' if invalid_rejoin else ""
+    rejoin = f"""<section id="rejoin-group">
+  <h2>{t["already_joined"]}</h2>
+  <p>{t["rejoin_help"]}</p>
+  {error}
+  <form action="/join/{session.code}/rejoin?lang={language}" method="post">
+    <label for="rejoin-code">{t["rejoin_code"]}</label>
+    <input id="rejoin-code" name="rejoin_code" autocapitalize="characters" spellcheck="false" autocomplete="off" required>
+    <button>{t["rejoin"]}</button>
+  </form>
+</section>""" if occupied else ""
     cards = []
     for site in SITES:
         occupancy = f'<p>{t["occupied"]}</p>' if site in occupied else ""
@@ -361,6 +412,7 @@ def choose_site(session, taken=False):
   <form class="site-choices" action="/join/{session.code}/take-site?lang={language}" method="post">
     {''.join(cards)}
   </form>
+  {rejoin}
 </section>""", layout="wide", session=session)
 
 

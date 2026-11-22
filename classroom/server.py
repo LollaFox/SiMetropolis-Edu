@@ -20,7 +20,7 @@ from qrcode.image.pure import PyPNGImage
 from . import views
 from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
 from .network import ClassroomLan, format_origin, has_network_settings, open_network_settings
-from .state import Classroom, ClassSession
+from .state import Classroom, ClassSession, SITES
 
 
 STATIC = Path(__file__).with_name("static")
@@ -167,10 +167,9 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return self.session_cookie(self.server.teacher_cookie_name, token, "/teacher")
 
-    def redirect(self, path, cookie=None):
+    def redirect(self, path, *cookies):
         headers = [("Location", path)]
-        if cookie:
-            headers.append(("Set-Cookie", cookie))
+        headers.extend(("Set-Cookie", cookie) for cookie in cookies if cookie)
         return Response(303, headers=tuple(headers))
 
     def closed_join(self, code, language, *, override=None):
@@ -263,7 +262,9 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                     headers=(("Vary", "Cookie"),), cache_control="private, no-cache",
                 )
-            return Response(200, views.choose_site(session, taken="taken" in fields))
+            return Response(200, views.choose_site(
+                session, taken="taken" in fields, invalid_rejoin=fields.get("notice") == ["invalid-rejoin"],
+            ))
         if path.startswith("/classes/"):
             code, _, action = path.removeprefix("/classes/").partition("/")
             if action == "status":
@@ -274,6 +275,14 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
             return self.teacher_projection(code, detail, language, join_origin, fields)
+        if path.startswith("/teacher/rejoin/"):
+            session = self.owned_class(path.removeprefix("/teacher/rejoin/"), language)
+            if isinstance(session, Response):
+                return session
+            site = fields.get("site", [""])[0]
+            if site not in SITES:
+                return Response(400)
+            return Response(200, views.teacher_rejoin(session, site))
         return Response(404, views.unavailable(language))
 
     def teacher_projection(self, code, detail, language, join_origin, fields):
@@ -393,15 +402,21 @@ class Handler(BaseHTTPRequestHandler):
         if session is None:
             return self.closed_join(code, language)
         group = session.groups.get(self.cookie_value("group_session"))
-        if action == "take-site":
+        if action in {"take-site", "rejoin"}:
             join_path = student_join_path(session)
             if group:
                 return self.redirect(join_path)
-            token = session.take_site(fields.get("site", [""])[0])
-            if token is None:
-                return self.redirect(f"{join_path}&taken=1")
-            cookie = self.session_cookie("group_session", token, f"/join/{code}")
-            return self.redirect(join_path, cookie)
+            if action == "take-site":
+                token = session.take_site(fields.get("site", [""])[0])
+                if token is None:
+                    return self.redirect(f"{join_path}&taken=1")
+            else:
+                token = session.redeem_rejoin_code(fields.get("rejoin_code", [""])[0])
+                if token is None:
+                    return self.redirect(f"{join_path}&notice=invalid-rejoin#rejoin-group")
+            path = f"/join/{code}"
+            return self.redirect(join_path, self.session_cookie("group_session", token, path),
+                                 self.session_cookie("group_language", session.groups[token].language, path))
         if group is None or action not in {"language", "design", "view", "share"}:
             return Response(404)
         current_site = fields.get("site", [""])[0] == group.site
