@@ -1,7 +1,6 @@
-"""Verify the Mac download after extracting it with macOS archive tools."""
+"""Verify the extracted Mac download through Launch Services on a logged-in Mac."""
 
 from contextlib import contextmanager
-from hashlib import sha256
 from http.cookiejar import CookieJar
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -12,6 +11,7 @@ import plistlib
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -28,47 +28,105 @@ RUNTIME_ARCHIVE = os.environ.get("SIMETROPOLIS_MAC_TEST_ARCHIVE")
 
 @unittest.skipUnless(sys.platform == "darwin", "requires macOS")
 class MacClassroomPackageTests(unittest.TestCase):
-    def extract_package(self, folder):
-        archive = folder / "SiMetropolis-Edu-Mac.zip"
-        extracted = folder / "Teacher Downloads"
-        subprocess.run([sys.executable, ROOT / "tools/build_mac_classroom.py", archive], check=True)
-        subprocess.run(["/usr/bin/ditto", "-x", "-k", archive, extracted], check=True)
-        return extracted / "Open SiMetropolis Edu.app"
+    @classmethod
+    def setUpClass(cls):
+        temporary = TemporaryDirectory(prefix="mac-classroom-package-")
+        cls.addClassCleanup(temporary.cleanup)
+        folder = Path(temporary.name)
+        cls.archive = folder / "SiMetropolis-Edu-Mac.zip"
+        subprocess.run([sys.executable, ROOT / "tools/build_mac_classroom.py", cls.archive], check=True)
+        if RUNTIME_ARCHIVE:
+            cls.driver = folder / "classroom-test-driver"
+            subprocess.run(["/usr/bin/xcrun", "swiftc", "-module-cache-path", folder / "swift-cache",
+                            ROOT / "tests/MacClassroomDriver.swift", "-o", cls.driver], check=True)
+
+    def setUp(self):
+        temporary = TemporaryDirectory(prefix="mac-classroom-launch-")
+        self.addCleanup(temporary.cleanup)
+        self.folder = Path(temporary.name)
+        extracted = self.folder / "Teacher Downloads"
+        subprocess.run(["/usr/bin/ditto", "-x", "-k", self.archive, extracted], check=True)
+        self.app = extracted / "Open SiMetropolis Edu.app"
 
     def test_the_download_extracts_to_one_classroom_launcher_for_both_mac_architectures(self):
-        with TemporaryDirectory(prefix="mac-classroom-package-") as directory:
-            app = self.extract_package(Path(directory))
-            self.assertEqual(list(app.parent.iterdir()), [app])
-            with (app / "Contents/Info.plist").open("rb") as plist:
-                executable = plistlib.load(plist)["CFBundleExecutable"]
-            binary = app / "Contents/MacOS" / executable
-            architectures = subprocess.check_output(["/usr/bin/lipo", "-archs", binary], text=True)
-            self.assertEqual(set(architectures.split()), {"arm64", "x86_64"})
-            subprocess.run(["/usr/bin/codesign", "--verify", "--strict", app], check=True)
+        self.assertEqual(list(self.app.parent.iterdir()), [self.app])
+        with (self.app / "Contents/Info.plist").open("rb") as plist:
+            executable = plistlib.load(plist)["CFBundleExecutable"]
+        binary = self.app / "Contents/MacOS" / executable
+        architectures = subprocess.check_output(["/usr/bin/lipo", "-archs", binary], text=True)
+        self.assertEqual(set(architectures.split()), {"arm64", "x86_64"})
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", self.app], check=True)
 
     @unittest.skipUnless(RUNTIME_ARCHIVE, "set SIMETROPOLIS_MAC_TEST_ARCHIVE to the native runtime tarball")
     def test_a_fresh_mac_opens_private_lesson_preparation_and_can_relaunch_offline(self):
-        with TemporaryDirectory(prefix="mac-classroom-launch-") as directory:
-            folder = Path(directory)
-            app = self.extract_package(folder)
-            archive = Path(RUNTIME_ARCHIVE)
-            with serve_runtime(archive) as (url, requested):
-                manifest = {platform.machine(): {"url": url, "sha256": sha256(archive.read_bytes()).hexdigest()}}
-                (app / "Contents/Resources/runtime.json").write_text(json.dumps(manifest))
-                subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", app], check=True)
-                with launch_app(app, folder) as browser_url:
-                    self.assertTrue(requested.wait(8), "The fresh launcher did not request the runtime")
-                    self.assert_lesson_preparation(browser_url)
-            # The launcher must reopen lesson preparation with its download source gone.
-            with launch_app(app, folder) as browser_url:
+        self.exercise_first_launch(interrupt=False)
+
+    @unittest.skipUnless(RUNTIME_ARCHIVE and os.environ.get("SIMETROPOLIS_MAC_TEST_RETRY") == "1",
+                         "set SIMETROPOLIS_MAC_TEST_ARCHIVE and SIMETROPOLIS_MAC_TEST_RETRY=1 for the Accessibility test")
+    def test_retry_after_an_interrupted_transfer_opens_private_lesson_preparation(self):
+        self.exercise_first_launch(interrupt=True)
+
+    def exercise_first_launch(self, interrupt):
+        with serve_runtime(Path(RUNTIME_ARCHIVE)) as (url, requested, connected):
+            manifest_path = self.app / "Contents/Resources/runtime.json"
+            manifest = json.loads(manifest_path.read_text())
+            runtime = manifest[platform.machine()]
+            runtime["url"] = url
+            manifest_path.write_text(json.dumps(manifest))
+            subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", self.app], check=True)
+            if not interrupt:
+                connected.set()
+            with self.launch_app() as browser_url:
+                self.assertTrue(requested.wait(15), "The fresh launcher did not request the runtime")
+                if interrupt:
+                    wait = subprocess.run([self.driver, "wait-for-retry", self.app])
+                    if wait.returncode == 77:
+                        self.skipTest("The test runner needs macOS Accessibility access to press Retry")
+                    wait.check_returncode()
+                    self.assertFalse(browser_url.exists(), "The classroom opened during an incomplete download")
+                    connected.set()
+                    subprocess.run([self.driver, "retry", self.app], check=True)
                 self.assert_lesson_preparation(browser_url)
+            application_support = self.folder / "Library/Application Support"
+            runtime_directory = application_support / "org.simetropolis.edu" / ("runtime-" + runtime["sha256"])
+            self.assertTrue((runtime_directory / "python/bin/python3").is_file(), "Runtime escaped the test home")
+        with self.launch_app() as browser_url:
+            self.assert_lesson_preparation(browser_url)
+
+    @contextmanager
+    def launch_app(self):
+        browser_url = self.folder / "browser-url"
+        browser_url.unlink(missing_ok=True)
+        opener = self.folder / "test-browser"
+        # Record the classroom PID alongside its URL in case teardown finds a surviving server.
+        pending = shlex.quote(str(self.folder / "pending-browser-url"))
+        opener.write_text(f'#!/bin/sh\nprintf "%s\\n%s\\n" "$1" "$PPID" > {pending}\n'
+                          f'mv {pending} {shlex.quote(str(browser_url))}\n')
+        opener.chmod(0o700)
+        subprocess.run(["/usr/bin/open", "-n", "--arch", platform.machine(), "--env", f"CFFIXED_USER_HOME={self.folder}",
+                        "--env", f"TMPDIR={self.folder}", "--env", f'BROWSER="{opener}" %s', self.app], check=True)
+        try:
+            yield browser_url
+        finally:
+            try:
+                subprocess.run([self.driver, "quit", self.app], check=True)
+            finally:
+                if browser_url.exists():
+                    entry, child = browser_url.read_text().splitlines()
+                    port = urlsplit(entry).port
+                    deadline = monotonic() + 5
+                    while accepts_connection(port):
+                        if monotonic() >= deadline:
+                            os.kill(int(child), signal.SIGTERM)
+                            self.fail("The classroom still accepted connections after its launcher quit")
+                        sleep(0.1)
 
     def assert_lesson_preparation(self, browser_url):
         deadline = monotonic() + 30
         while not browser_url.exists() and monotonic() < deadline:
             sleep(0.1)
         self.assertTrue(browser_url.exists(), "The launcher did not open the browser")
-        entry = urlsplit(browser_url.read_text().strip())
+        entry = urlsplit(browser_url.read_text().splitlines()[0])
         self.assertEqual(entry.hostname, "127.0.0.1")
         self.assertEqual(entry.path, "/teacher/launch")
         browser = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()))
@@ -81,9 +139,16 @@ class MacClassroomPackageTests(unittest.TestCase):
             self.assertIn(b"Start class", response.read())
 
 
+def accepts_connection(port):
+    with socket.socket() as connection:
+        connection.settimeout(1)
+        return connection.connect_ex(("127.0.0.1", port)) == 0
+
+
 @contextmanager
 def serve_runtime(archive):
     requested = Event()
+    connected = Event()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -92,7 +157,11 @@ def serve_runtime(archive):
             self.send_header("Content-Length", str(archive.stat().st_size))
             self.end_headers()
             with archive.open("rb") as runtime:
-                shutil.copyfileobj(runtime, self.wfile)
+                if connected.is_set():
+                    shutil.copyfileobj(runtime, self.wfile)
+                else:
+                    # Close mid-body with a larger declared length, as on a dropped connection.
+                    self.wfile.write(runtime.read(32768))
 
         def log_message(self, *_):
             pass
@@ -101,27 +170,7 @@ def serve_runtime(archive):
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            yield f"http://127.0.0.1:{server.server_port}/python.tar.gz", requested
+            yield f"http://127.0.0.1:{server.server_port}/python.tar.gz", requested, connected
         finally:
             server.shutdown()
             thread.join()
-
-
-@contextmanager
-def launch_app(app, folder):
-    browser_url = folder / "browser-url"
-    browser_url.unlink(missing_ok=True)
-    opener = folder / "test-browser"
-    opener.write_text(f'#!/bin/sh\nprintf "%s\\n" "$1" > {shlex.quote(str(browser_url))}\n')
-    opener.chmod(0o700)
-    environment = {**os.environ, "CFFIXED_USER_HOME": str(folder), "TMPDIR": str(folder),
-                   "BROWSER": f'"{opener}" %s'}
-    with subprocess.Popen(["/usr/bin/arch", f"-{platform.machine()}", app / "Contents/MacOS/OpenSiMetropolisEdu"],
-                          env=environment, start_new_session=True) as launcher:
-        try:
-            yield browser_url
-        finally:
-            try:
-                os.killpg(launcher.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
