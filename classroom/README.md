@@ -1,6 +1,6 @@
 # Long Valley classroom
 
-On a prepared computer, double-click **Open SiMetropolis Edu** (`.command` on Mac, `.cmd` on Windows). The default browser opens lesson preparation, including when the computer is disconnected. Choose English or 繁體中文, then click **Start class** when you are ready. Keep the launcher window open while using the classroom.
+On a prepared computer, double-click **Open SiMetropolis Edu** (`.command` on Mac, `.cmd` on Windows). The default browser opens lesson preparation, including when the computer is disconnected. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
 If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
 
@@ -24,7 +24,7 @@ py -3 -m venv .venv
 
 ### Manual server setup
 
-The shortcuts use a loopback address. To test with separate devices on the classroom network, use the manual setup and LAN options below. Run these commands from the repository root with Python 3.9 or newer.
+To run the server and sign in manually, use these commands from the repository root with Python 3.9 or newer.
 
 ```sh
 python3 -m venv /tmp/long-valley-venv
@@ -46,11 +46,13 @@ Each group can select **Save for swap** to keep the crossing it wants to try at 
 
 Connected group screens switch as soon as they receive the teacher’s swap. If a device loses its connection or resumes from the background while showing its starting site, it hides that map until the classroom confirms the current site.
 
-The class lasts 45 minutes by default. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
+The 45-minute countdown starts when you select **Start class**. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
 
 ## Group devices
 
-For devices on a trusted local network, bind to the teacher computer’s LAN address and use the same address in the public URL. Replace the example address with the teacher computer’s address, and open the teacher view through that URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
+The shortcut and the default `serve` command listen on local IPv4 interfaces. The launcher opens the private teacher view on the teacher’s computer. The projection uses a connected Wi-Fi or Ethernet address so groups on the same network can join. The classroom network must allow connections between devices.
+
+For testing on one device, use `serve --host 127.0.0.1`. To specify a fixed address, use `--host` and `--public-url` together, then open the teacher view through the public URL. For a server behind an HTTPS reverse proxy, set `--public-url` to the HTTPS origin.
 
 ```sh
 python -B -m classroom serve --host 192.168.1.10 --public-url http://192.168.1.10:8899
@@ -64,7 +66,9 @@ Install Playwright and jsQR in an external test directory. Set `PLAYWRIGHT_PATH`
 node --test tools/check_long_valley.mjs
 ```
 
-The tests launch an isolated loopback classroom and use independent browser contexts for teachers and groups. They verify that only the class teacher can load the projection and its QR image. They decode the QR, join both sites, and exercise both languages. They also check manual ending, expiry, a fresh class, and the message shown when a group reopens a closed Traditional Chinese class.
+The connected-class tests start the prepared launcher and use separate browser sessions on the same computer to join through its LAN address. They cover both opening languages, all three join methods and teacher ownership. The timer test checks that reloading the teacher view preserves the original deadline. Run `python -B -m unittest discover -s tests -p test_classroom_network.py` for adapter-selection checks.
+
+To verify a classroom network, open the shortcut on the teacher’s computer and join from a second device on the same Wi-Fi or Ethernet. In an English class, follow the projected link and choose Site A. Start another class in 繁體中文, scan the QR and choose 場地 A, then use a fresh browser session on the student device to enter the short code and choose 場地 B.
 
 The launcher checks open the default-browser URL in Chromium with loopback access, exercise language selection before the teacher starts class, and verify that a second browser cannot reuse the private sign-in link. The shortcut check installs `classroom/requirements.txt` into a temporary package's own virtual environment, then runs the local platform's launcher from a folder with spaces in its name. For an offline test run, download the wheels beforehand with `python -m pip download -r classroom/requirements.txt -d wheels`. Set `PIP_NO_INDEX=1` and `PIP_FIND_LINKS` to the absolute path of that wheels directory when running the tests.
 

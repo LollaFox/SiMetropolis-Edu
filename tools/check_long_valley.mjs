@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { test } from 'node:test';
@@ -14,6 +14,9 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const root = new URL('../', import.meta.url);
 const python = process.env.PYTHON || 'python3';
+const lanAddresses = Object.values(networkInterfaces()).flat()
+  .filter(({ family, internal }) => family === 'IPv4' && !internal).map(({ address }) => address);
+const lanTest = { timeout: 30000, skip: !lanAddresses.length && 'Needs a connected IPv4 interface' };
 const nativeShortcut = { darwin: 'Open SiMetropolis Edu.command', win32: 'Open SiMetropolis Edu.cmd' }[process.platform];
 
 async function openClassroomBrowser(t, child, closed, browser) {
@@ -41,7 +44,7 @@ async function classroom(t, ...options) {
       cwd: root, encoding: 'utf8',
     }).trim();
   }
-  const server = spawn(python, [...command, 'serve', '--port', '0', ...options], {
+  const server = spawn(python, [...command, 'serve', '--host', '127.0.0.1', '--port', '0', ...options], {
     cwd: root, stdio: ['ignore', 'pipe', 'inherit'],
   });
   const closed = once(server, 'close');
@@ -134,6 +137,11 @@ with patch('classroom.server.monotonic', new=lambda: next(clock, 121)):
 }
 
 async function openClass(page, origin, credential, language = 'English') {
+  await prepareClass(page, origin, credential, language);
+  await page.getByRole('button', { name: /Start class|開始課堂/ }).click();
+}
+
+async function prepareClass(page, origin, credential, language) {
   await page.goto(`${origin}/teacher`);
   if (language === '繁體中文') {
     await page.getByRole('link', { name: '繁體中文' }).click();
@@ -141,7 +149,6 @@ async function openClass(page, origin, credential, language = 'English') {
   await page.getByLabel(/Teacher credential|教師憑證/).fill(credential);
   await page.getByRole('button', { name: /Sign in|登入/ }).click();
   await page.getByLabel(/Starting language|起始語言/).selectOption({ label: language });
-  await page.getByRole('button', { name: /Start class|開始課堂/ }).click();
 }
 
 async function participant(browser) {
@@ -180,6 +187,105 @@ async function readQr(projector) {
   assert.ok(result, 'The projected QR image must be scannable');
   return result.data;
 }
+
+async function startConnectedClass(teacher, launchUrl, language) {
+  await teacher.goto(launchUrl.href);
+  await teacher.waitForURL(`${launchUrl.origin}/teacher`);
+  await teacher.reload();
+  const start = teacher.getByRole('button', { name: 'Start class' });
+  await start.waitFor();
+  assert.equal(await teacher.getByRole('timer').count(), 0);
+  assert.equal(await teacher.getByRole('link', { name: 'Project join information' }).count(), 0);
+  assert.equal(await teacher.getByRole('alert').count(), 0);
+  await teacher.getByLabel('Starting language').selectOption({ label: language });
+  const started = performance.now();
+  await start.click();
+  const timer = teacher.getByRole('timer', { name: /Time remaining|剩餘時間/ });
+  const [minutes, seconds] = (await timer.textContent()).split(':').map(Number);
+  const remaining = (minutes * 60 + seconds) * 1000;
+  assert.ok(remaining <= 45 * 60000 && remaining >= 45 * 60000 - (performance.now() - started),
+    'The default deadline should be 45 minutes from Start class');
+  assert.equal(await teacher.getByRole('alert').count(), 0);
+  assert.equal(await teacher.getByText(/Open network settings|開啟網絡設定/).count(), 0);
+}
+
+test('a connected English class projects a LAN link that a group can use', lanTest, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t, { shortcut: Boolean(nativeShortcut) });
+  const teacher = await participant(browser);
+  await startConnectedClass(teacher, launchUrl, 'English');
+  const projector = await openProjection(teacher);
+  const bookmark = await teacher.request.get(projector.url() + '/');
+  assert.equal(bookmark.status(), 200);
+  const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+  assert.ok(lanAddresses.includes(new URL(joinUrl).hostname), 'The projection must use a LAN address');
+  const group = await participant(browser);
+  await group.goto(joinUrl);
+  await group.getByRole('button', { name: 'Choose Site A' }).click();
+  await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+});
+
+test('a connected Traditional Chinese class admits groups by QR and short code and keeps the projection private', lanTest, async (t) => {
+  const { browser, launchUrl } = await launchClassroom(t);
+  const teacher = await participant(browser);
+  await startConnectedClass(teacher, launchUrl, '繁體中文');
+
+  const projector = await openProjection(teacher);
+  const joinUrl = await readQr(projector);
+  const lanOrigin = new URL(joinUrl).origin;
+  assert.ok(lanAddresses.includes(new URL(joinUrl).hostname), 'The QR must use a LAN address');
+  assert.equal(joinUrl, await projector.getByRole('link', { name: /\/join\// }).getAttribute('href'));
+  assert.ok(!joinUrl.includes(launchUrl.hash.slice(1)), 'The QR must contain only the student URL');
+  const groupA = await participant(browser);
+  await groupA.goto(joinUrl);
+  await groupA.getByRole('button', { name: '選擇場地 A' }).click();
+  await groupA.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+
+  const code = await projector.locator('code').innerText();
+  const entry = await projector.getByRole('link', { name: `${lanOrigin}/join`, exact: true }).getAttribute('href');
+  const groupB = await participant(browser);
+  await groupB.goto(entry);
+  await groupB.getByLabel('課堂代碼').fill(code);
+  await groupB.getByRole('button', { name: '尋找課堂' }).click();
+  assert.equal(groupB.url(), joinUrl);
+  assert.ok(await groupB.getByRole('button', { name: '選擇場地 A' }).isDisabled());
+  await groupB.getByRole('button', { name: '選擇場地 B' }).click();
+  await groupB.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
+
+  const teacherPage = await groupB.goto(`${lanOrigin}/teacher?lang=zh-Hant`);
+  if (teacherPage.ok()) await groupB.getByRole('button', { name: '登入' }).waitFor();
+  else assert.ok([403, 404].includes(teacherPage.status()));
+  assert.equal(await groupB.getByRole('button', { name: /開始課堂|結束課堂|交換場地/ }).count(), 0);
+  const projectionPath = new URL(projector.url()).pathname;
+  for (const path of [projectionPath, `${projectionPath}/qr.png`]) {
+    assert.equal((await groupB.request.get(lanOrigin + path)).status(), 403);
+  }
+});
+
+test('the teacher countdown starts on click and keeps its original deadline after reload', { timeout: 30000 }, async (t) => {
+  const { browser, issueCredential, origin } = await classroom(t, '--duration-seconds', '7');
+  const teacher = await participant(browser);
+  await prepareClass(teacher, origin, issueCredential(), '繁體中文');
+  const timer = teacher.getByRole('timer', { name: '剩餘時間' });
+  const project = teacher.getByRole('link', { name: '投影加入資訊' });
+  assert.equal(await timer.count(), 0);
+  const [started] = await Promise.all([
+    teacher.waitForRequest(request => new URL(request.url()).pathname === '/teacher/start')
+      .then(() => performance.now()),
+    teacher.getByRole('button', { name: '開始課堂' }).click(),
+  ]);
+  assert.equal(await timer.textContent(), '00:07');
+  const projectionPath = await project.getAttribute('href');
+  await teacher.waitForFunction(() => document.querySelector('[role="timer"]').textContent === '00:05');
+  await teacher.reload();
+  assert.match(await timer.textContent(), /^00:0[345]$/);
+  assert.equal(await project.getAttribute('href'), projectionPath);
+  const statusUrl = new URL(projectionPath + '/status', origin).href;
+  await delay(Math.max(0, started + 6750 - performance.now()));
+  assert.equal((await teacher.request.get(statusUrl)).status(), 204, 'The original deadline is still ahead');
+  await delay(Math.max(0, started + 7500 - performance.now()));
+  assert.equal((await teacher.request.get(statusUrl)).status(), 410, 'Reload must not extend the original deadline');
+  await teacher.getByRole('button', { name: '開始課堂' }).waitFor({ timeout: 2500 });
+});
 
 test('the prepared launcher opens lesson preparation with only a loopback connection', { timeout: 30000 }, async (t) => {
   const { browser, launchUrl } = await launchClassroom(t);
@@ -239,20 +345,27 @@ test('a group browser cannot reuse the launcher sign-in or open the teacher proj
   await teacher.goto(launchUrl.href);
   await teacher.waitForURL(teacherView);
   await teacher.getByRole('button', { name: 'Start class' }).click();
-  const projector = await openProjection(teacher);
-  const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
-  const code = await projector.locator('code').innerText();
-  assert.equal(joinUrl, `${launchUrl.origin}/join/${code}?lang=en`);
-  assert.equal(await readQr(projector), joinUrl);
-  assert.ok(!((await projector.content()).includes(launchUrl.hash.slice(1))), 'Projection exposed the sign-in ticket');
+  await teacher.getByRole('heading', { name: 'Your class is open' }).waitFor();
 
   await group.goto(launchUrl.href);
   await group.getByRole('alert').getByText('Open SiMetropolis Edu again to reach the teacher view.').waitFor();
   assert.equal(new URL(group.url()).hash, '');
-  const projectionStatus = await group.evaluate(async (url) => (await fetch(url)).status, projector.url());
-  assert.equal(projectionStatus, 403);
-  await group.goto(joinUrl);
-  await group.getByRole('heading', { name: 'Choose your starting site' }).waitFor();
+  const code = await teacher.getByRole('button', { name: 'End class' }).getAttribute('value');
+  for (const path of [`/teacher/project/${code}`, `/teacher/project/${code}/qr.png`]) {
+    assert.equal((await group.request.get(launchUrl.origin + path)).status(), 403);
+  }
+  const project = teacher.getByRole('link', { name: 'Project join information' });
+  if (await project.count()) {
+    const projector = await openProjection(teacher);
+    const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+    const address = new URL(joinUrl);
+    assert.ok(lanAddresses.includes(address.hostname));
+    assert.equal(joinUrl, `${address.origin}/join/${code}?lang=en`);
+    assert.equal(await readQr(projector), joinUrl);
+    assert.ok(!(await projector.content()).includes(launchUrl.hash.slice(1)), 'Projection exposed the sign-in ticket');
+    await group.goto(joinUrl);
+    await group.getByRole('heading', { name: 'Choose your starting site' }).waitFor();
+  }
 });
 
 test('a second launcher preserves the first teacher session in the same browser', { timeout: 30000 }, async (t) => {
@@ -260,21 +373,32 @@ test('a second launcher preserves the first teacher session in the same browser'
   const teacher = await participant(first.browser);
   await teacher.goto(first.launchUrl.href);
   await teacher.getByRole('button', { name: 'Start class' }).click();
-  const projection = teacher.getByRole('link', { name: 'Project join information' });
-  const originalClass = await projection.getAttribute('href');
+  const endClass = teacher.getByRole('button', { name: 'End class' });
+  const originalClass = await endClass.getAttribute('value');
 
   const second = await launchClassroom(t, { browser: first.browser });
+  if (await teacher.getByRole('link', { name: 'Project join information' }).count()) {
+    const projector = await openProjection(teacher);
+    const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+    const studentEntry = new URL(second.launchUrl);
+    studentEntry.hostname = new URL(joinUrl).hostname;
+    const group = await participant(first.browser);
+    const response = await group.goto(studentEntry.href);
+    if (response.ok()) await group.getByRole('alert').waitFor();
+    else assert.ok([403, 404].includes(response.status()));
+    assert.equal(await group.getByRole('button', { name: 'Start class' }).count(), 0);
+  }
   const secondTab = await teacher.context().newPage();
   await secondTab.goto(second.launchUrl.href);
   const signOut = secondTab.getByRole('button', { name: 'Sign out' });
   await signOut.waitFor();
   await teacher.reload();
-  assert.equal(await projection.getAttribute('href'), originalClass);
+  assert.equal(await endClass.getAttribute('value'), originalClass);
 
   await signOut.click();
   await secondTab.getByLabel('Teacher credential').waitFor();
   await teacher.reload();
-  assert.equal(await projection.getAttribute('href'), originalClass);
+  assert.equal(await endClass.getAttribute('value'), originalClass);
   await teacher.getByRole('button', { name: 'End class' }).click();
   await teacher.getByRole('button', { name: 'Start class' }).waitFor();
 });

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from ipaddress import IPv4Address
 from pathlib import Path
 import secrets
 from threading import Thread
@@ -17,6 +18,7 @@ from qrcode.image.pure import PyPNGImage
 
 from . import views
 from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
+from .network import ClassroomLan, format_origin
 from .state import Classroom, ClassSession
 
 
@@ -107,6 +109,36 @@ class Handler(BaseHTTPRequestHandler):
     def teacher_id(self):
         return self.classroom.teacher_for_session(self.cookie_value(self.server.teacher_cookie_name))
 
+    def join_origin_for_page(self, path):
+        if self.server.lan is None:
+            return self.server.origin
+        if path != "/teacher" and not path.startswith("/teacher/project/"):
+            return None
+        with self.classroom.lock:
+            teacher = self.teacher_id()
+            session = self.classroom.class_for_teacher(teacher) if teacher else None
+            if session is None:
+                return None
+            projection = f"/teacher/project/{session.code}"
+            if path not in ("/teacher", projection, projection + "/", projection + "/qr.png"):
+                return None
+        # Windows adapter discovery can take seconds. Groups can still act and
+        # classes can expire while the teacher waits. get_page rechecks ownership.
+        return self.server.lan.join_origin(refresh=path == "/teacher")
+
+    def local_request_origin(self):
+        # Match the numeric address the browser reached, including on a multi-interface host.
+        address, port = self.connection.getsockname()
+        origin = format_origin("http", address, port)
+        if self.headers.get("Host") in (origin.removeprefix("http://"), f"{address}:{port}"):
+            return origin
+        return None
+
+    def is_local_teacher_launch(self):
+        return (self.server.teacher_launch is not None
+                and IPv4Address(self.client_address[0]).is_loopback
+                and self.local_request_origin() == self.server.origin)
+
     def owned_class(self, code, language) -> Union[ClassSession, Response]:
         teacher = self.teacher_id()
         if teacher is None:
@@ -160,8 +192,9 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 # A group can leave the page while the request is waiting for a swap.
                 return
+        join_origin = self.join_origin_for_page(path)
         with self.classroom.lock:
-            response = self.get_page(path, language, fields)
+            response = self.get_page(path, language, fields, join_origin)
         self.respond(response)
 
     def group_status(self, code, *, wait_for_swap):
@@ -174,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(403)
             if not wait_for_swap or session.swapped:
                 return group_assignment(group)
-            timeout = min(SWAP_WAIT_SECONDS, session.expires_at - monotonic())
+            timeout = min(SWAP_WAIT_SECONDS, session.remaining_seconds())
 
         session.swap_or_end.wait(timeout)
         with self.classroom.lock:
@@ -182,10 +215,10 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(410)
             return group_assignment(group)
 
-    def get_page(self, path, language, fields):
+    def get_page(self, path, language, fields, join_origin):
         if path == "/":
             return Response(200, views.home(language))
-        if path == "/teacher/launch" and self.server.teacher_launch:
+        if path == "/teacher/launch" and self.is_local_teacher_launch():
             return Response(200, views.teacher_launch(language))
         if path == "/teacher":
             teacher = self.teacher_id()
@@ -193,7 +226,11 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(200, views.sign_in(language))
             session = self.classroom.class_for_teacher(teacher)
             notice = fields.get("notice", [""])[0]
-            return Response(200, views.teacher(session.language if session else language, session, notice=notice))
+            if session is None:
+                return Response(200, views.teacher(language))
+            return Response(200, views.teacher(
+                session.language, session, notice=notice, can_project=join_origin is not None,
+            ))
         if path == "/join":
             if "code" not in fields:
                 return Response(200, views.find_class(language))
@@ -229,10 +266,10 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(204, headers=(("X-Sites-Swapped", str(session.swapped).lower()),))
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
-            return self.teacher_projection(code, detail, language)
+            return self.teacher_projection(code, detail, language, join_origin)
         return Response(404, views.unavailable(language))
 
-    def teacher_projection(self, code, detail, language):
+    def teacher_projection(self, code, detail, language, join_origin):
         session = self.owned_class(code, language)
         if isinstance(session, Response):
             return session
@@ -248,7 +285,9 @@ class Handler(BaseHTTPRequestHandler):
             if comparison is not None:
                 return Response(200, views.comparison_projection(session, comparison))
         if detail in {"", "qr.png"}:
-            join_url = self.server.origin + student_join_path(session)
+            if join_origin is None:
+                return Response(503)
+            join_url = join_origin + student_join_path(session)
             if detail == "qr.png":
                 image = BytesIO()
                 qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
@@ -258,7 +297,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path, language, _ = self.request_target()
-        if self.headers.get("Origin") != self.server.origin:
+        expected = self.local_request_origin() if self.server.lan is not None else self.server.origin
+        if expected is None or self.headers.get("Origin") != expected:
             return self.respond(Response(403))
         size = self.headers.get("Content-Length", "")
         if not size.isascii() or not size.isdecimal() or len(size) > 4:
@@ -269,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
         self.respond(response)
 
     def post_page(self, path, language, fields):
-        if path == "/teacher/launch" and self.server.teacher_launch:
+        if path == "/teacher/launch" and self.is_local_teacher_launch():
             launch = self.server.teacher_launch
             try:
                 credential = launch.redeem(fields.get("ticket", [""])[0])
@@ -417,9 +457,12 @@ def open_teacher_browser(server):
 
 
 def run(host, port, public_url, duration_seconds, credentials, *, launch_teacher=False):
-    with ThreadingHTTPServer((host, port), Handler) as server:
+    automatic_network = host is None and public_url is None
+    bind_host = host or ("0.0.0.0" if automatic_network else "127.0.0.1")
+    with ThreadingHTTPServer((bind_host, port), Handler) as server:
         server.classroom = Classroom(credentials, duration_seconds)
-        server.origin = public_url or f"http://127.0.0.1:{server.server_port}"
+        server.origin = public_url or format_origin("http", "127.0.0.1", server.server_port)
+        server.lan = ClassroomLan(server.server_port) if automatic_network else None
         # Browsers share cookies across ports, even when two launchers run separate classrooms.
         server.teacher_cookie_name = f"teacher_session_{server.server_port}" if launch_teacher else "teacher_session"
         server.teacher_launch = None

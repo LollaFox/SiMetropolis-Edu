@@ -3,6 +3,7 @@
 from base64 import b64encode
 from hashlib import sha256
 from html import escape
+from math import ceil
 from pathlib import Path
 from urllib.parse import quote
 
@@ -32,6 +33,7 @@ COPY = {
     "starting_language": ("Starting language", "起始語言"),
     "start": ("Start class", "開始課堂"),
     "open": ("Your class is open", "課堂已開啟"),
+    "time_remaining": ("Time remaining", "剩餘時間"),
     "project": ("Project join information", "投影加入資訊"),
     "project_help": ("Open the join information in this browser and show that tab on the projector.", "請在此瀏覽器開啟加入資訊，並將該分頁投影給小組。"),
     "shared_comparisons": ("Shared comparisons", "已分享的比較結果"),
@@ -153,18 +155,26 @@ def teacher_launch(language):
 </section>""")
 
 
-def teacher(language, session=None, *, notice=""):
+def teacher(language, session=None, *, notice="", can_project=False):
     t = words(language, COPY)
     sign_out = f"""<form class="inline" action="/teacher/sign-out?lang={language}" method="post">
   <button class="secondary">{t["sign_out"]}</button>
 </form>"""
     if session:
+        remaining_ms = ceil(session.remaining_seconds() * 1000)
+        minutes, seconds = divmod(ceil(remaining_ms / 1000), 60)
+        project_help = f'<p>{t["project_help"]}</p>' if can_project else ""
+        project_link = f"""<a class="button" href="/teacher/project/{session.code}"
+      target="_blank" rel="noopener">{t["project"]}</a>""" if can_project else ""
         return page(language, t["open"], f"""
 <section class="panel">
   <h1>{t["open"]}</h1>
-  <p>{t["project_help"]}</p>
+  <p><span id="class-time-label">{t["time_remaining"]}</span>
+    <span role="timer" aria-labelledby="class-time-label" data-remaining-ms="{remaining_ms}">{minutes:02d}:{seconds:02d}</span>
+  </p>
+  {project_help}
   <div class="teacher-actions">
-    <a class="button" href="/teacher/project/{session.code}" target="_blank" rel="noopener">{t["project"]}</a>
+    {project_link}
     <a class="button secondary" href="{comparison_url(session)}" target="_blank" rel="noopener">{t["shared_comparisons"]}</a>
   </div>
   {pass_the_city_controls(session, t, notice)}
