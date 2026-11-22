@@ -71,7 +71,7 @@ private final class Launcher: NSObject, NSApplicationDelegate {
     private let status = NSTextField(wrappingLabelWithString: "Preparing Long Valley…")
     private let progress = NSProgressIndicator()
     private lazy var action = NSButton(title: "Retry", target: self, action: #selector(setupAction))
-    private var classroom: Process?
+    private var classroomProcesses = Set<Process>()
     private var download: URLSessionDownloadTask?
     private var progressTimer: Timer?
     private var quitAfterSetup = false
@@ -117,6 +117,13 @@ private final class Launcher: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if classroomProcesses.contains(where: \.isRunning) {
+            openClassroom()
+        }
+        return true
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let download else { return .terminateNow }
         quitAfterSetup = true
@@ -125,7 +132,7 @@ private final class Launcher: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let classroom, classroom.isRunning { classroom.interrupt() }
+        for process in classroomProcesses where process.isRunning { process.interrupt() }
     }
 
     @objc private func setupAction() {
@@ -227,14 +234,18 @@ private final class Launcher: NSObject, NSApplicationDelegate {
         // Use Launch Services to open the default browser without Apple Events automation permissions.
         if environment["BROWSER"] == nil { environment["BROWSER"] = "/usr/bin/open %s" }
         process.environment = environment
-        process.terminationHandler = { _ in
+        process.terminationHandler = { finished in
             DispatchQueue.main.async {
-                self.classroom = nil
-                self.showFailure(SetupError.classroomExited)
+                self.classroomProcesses.remove(finished)
+                if finished.terminationStatus != 0 {
+                    self.showFailure(SetupError.classroomExited)
+                } else if self.classroomProcesses.isEmpty {
+                    NSApp.terminate(nil)
+                }
             }
         }
         try process.run()
-        classroom = process
+        classroomProcesses.insert(process)
         action.isHidden = true
         status.stringValue = "Continue in your browser. Keep this window open while using the classroom."
     }

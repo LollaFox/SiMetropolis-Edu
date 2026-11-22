@@ -12,6 +12,8 @@ If Edu loses the classroom network or you start while disconnected, the timer ke
 
 If a returning group scans the restored QR and sees **Choose your starting site**, open **Help a group rejoin** in the private teacher tab. Select the site where the group **started**, even after **Pass the City**, and choose **Get group rejoin code**. Give the code privately to that group. On its device, the group enters the code and selects **Rejoin my group** to reopen its current site with its recorded crossing and chosen language. Each code works once. If the group needs another, select its starting site again to see the current code.
 
+If you close the teacher tab during class, double-click **Open SiMetropolis Edu** again from the same installation. Your class reopens with the original join code and countdown. Groups can keep working in their existing tabs.
+
 If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
 
 ### Prepare a local checkout
@@ -88,6 +90,8 @@ On Mac and Windows, verify recovery both before starting and during a lesson. Di
 
 The launcher checks open the private sign-in link in Chromium, exercise language selection before class, and verify that a second browser cannot reuse the link.
 
+The launcher checks use Chromium to reopen a live class while a group keeps its tested crossing. They also cover separate installations used by the same teacher, a Mac checkout with a read-only classroom directory, and a delayed browser profile selection that overlaps another launch.
+
 On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. The test builds and extracts the teacher ZIP, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then stops the launcher and reopens the same package with component downloads blocked.
 
 ```powershell
@@ -107,6 +111,6 @@ Use macOS with Xcode selected and Python 3 with pip. To create the ZIP for local
 
 Pass `--signing-identity "Developer ID Application: …"` and `--notary-profile PROFILE` together to build the distribution ZIP. The script signs the app, submits it to Apple, and packages it with the stapled ticket. It extracts the final ZIP and checks the ticket, signature, and Gatekeeper assessment. Link the signed and notarized ZIP from the project download page after verifying it on a clean Mac. See [Apple's distribution testing guidance](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
 
-Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and repeats with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
+Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and reopens a running class with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
 
 To check the distribution ZIP, download it in a browser on a clean Mac, extract it in Finder, and double-click **Open SiMetropolis Edu**. Interrupt the runtime transfer and verify **Retry** opens the private teacher page after reconnecting. Quit the launcher, disconnect Wi-Fi and Ethernet, and double-click the same app again. Lesson preparation should open in the browser.
