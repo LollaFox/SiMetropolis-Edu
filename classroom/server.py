@@ -231,21 +231,19 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(400)
             draft = Design(alignment, crossing_type, access_route, construction_season)
 
+        explore_year = action in {"view", "language"} and fields.get("explore") == ["year"]
         anchor = "#crossing-comparison"
         notice = ""
-        explore = ""
         if action == "language":
             preferred = fields.get("language", [""])[0]
             if preferred not in views.LANGUAGES:
                 return Response(400)
             group.language = preferred
             anchor = ""
-            if fields.get("explore") == ["year"]:
-                explore = "&explore=year"
         elif action == "design":
             group.tested_design = draft
             group.show_works = True
-        else:
+        elif not explore_year:
             view = fields.get("view", [""])[0]
             if view == "reset":
                 draft = group.tested_design = Design()
@@ -266,7 +264,9 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(400)
         group.draft_design = draft
         season_query = f"&season={season}" if season != DEFAULT_SEASON else ""
-        return self.redirect(f"{join_path}{season_query}{explore}{notice}{anchor}")
+        if explore_year:
+            return self.redirect(f"/join/{session.code}?lang={group.language}{season_query}&explore=year")
+        return self.redirect(f"{join_path}{season_query}{notice}{anchor}")
 
 
 def run(host, port, public_url, duration_seconds, credentials):

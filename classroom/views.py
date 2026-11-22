@@ -229,7 +229,6 @@ def choose_site(session, taken=False):
 def group_opening(session, group, *, season, notice=""):
     language, site = group.language, group.site
     t = words(language, COPY)
-    query = group_view_query(language, season)
     return page(language, t["puzzle"], f"""
 <section class="panel">
   <div class="opening">
@@ -241,10 +240,10 @@ def group_opening(session, group, *, season, notice=""):
     <p class="site-note">{t["imagined"]}</p>
     <h2>{t[site]}</h2>
     <p>{t["site_" + site]}</p>
-    <a class="wetland-entry" href="/join/{session.code}?{query}&amp;explore=year" aria-labelledby="explore-wetland">
+    <button class="wetland-entry" type="submit" form="crossing-design" name="explore" value="year" aria-labelledby="explore-wetland">
       <span class="button" id="explore-wetland">{t["explore"]}</span>
       {opening_map(site, language)}
-    </a>
+    </button>
     {crossing_investigation(session, group, season, notice)}
   </section>
 </section>""", layout="wide", session=session)

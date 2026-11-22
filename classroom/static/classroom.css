@@ -43,7 +43,8 @@ form.inline { display: inline-flex; margin: 0; }
 .end { border-color: #944332; background: transparent; color: #883b29; }
 .end:hover { background: #f3e4d9; }
 .site { margin-top: 1.3rem; }
-.wetland-entry { display: block; max-width: 48rem; }
+.wetland-entry { display: block; width: min(100%, 48rem); padding: 0; border: 0; background: transparent; text-align: start; }
+.wetland-entry:hover { background: transparent; }
 .wetland-entry .button { margin-bottom: .65rem; }
 .wetland-entry:is(:hover, :focus-visible) .map-wetland { fill: #9cbe7d; stroke: #235c46; stroke-width: 4px; }
 .wetland-entry:hover .button { background: #103f33; }
@@ -149,6 +150,21 @@ summary { cursor: pointer; }
 @media (orientation: landscape) and (max-height: 54rem) {
   .comparison-page { max-width: 53rem; padding-block: .65rem; }
   .wetland-overview { padding: 1rem; }
+}
+
+@media (min-width: 48rem) and (orientation: landscape) and (max-height: 45rem) {
+  .comparison-page { max-width: 64rem; }
+  .wetland-overview {
+    display: grid;
+    grid-template: "back seasons" auto "intro seasons" auto "source seasons" 1fr / 12rem minmax(0, 1fr);
+    gap: .75rem 1rem;
+    align-items: start;
+  }
+  .wetland-overview > a { grid-area: back; }
+  .wetland-overview .opening { grid-area: intro; display: flex; flex-direction: column; gap: .65rem; margin: 0; }
+  .wetland-overview h1 { font-size: 2rem; }
+  .season-grid { grid-area: seasons; }
+  .season-source { grid-area: source; }
 }
 
 @media (max-width: 39rem) {

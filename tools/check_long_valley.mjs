@@ -206,20 +206,29 @@ test('the join link, scanned QR, and short code reach the paired sites before th
   assert.ok(await groupA.getByRole('button', { name: 'Choose Site B' }).isEnabled());
 });
 
-for (const locale of [
-  {
-    language: 'English', tag: 'en',
-    choose: 'Choose Site', puzzle: 'How would you get a railway across Long Valley?',
-    explore: 'Explore through the year', comparison: 'The wetland through the year',
-    alternate: '繁體中文', seasons: ['Spring', 'Summer', 'Autumn', 'Winter'],
-  },
-  {
-    language: '繁體中文', tag: 'zh-Hant',
-    choose: '選擇場地', puzzle: '你會怎樣讓鐵路穿越塱原？',
-    explore: '探索濕地四季', comparison: '濕地的四季',
-    alternate: 'English', seasons: ['春季', '夏季', '秋季', '冬季'],
-  },
-]) {
+const english = {
+  language: 'English', tag: 'en', site: 'Site', choose: 'Choose Site',
+  puzzle: 'How would you get a railway across Long Valley?', back: 'Back to the railway puzzle',
+  explore: 'Explore through the year', comparison: 'The wetland through the year',
+  seasons: ['Spring', 'Summer', 'Autumn', 'Winter'],
+};
+const traditionalChinese = {
+  language: '繁體中文', tag: 'zh-Hant', site: '場地', choose: '選擇場地',
+  puzzle: '你會怎樣讓鐵路穿越塱原？', back: '返回鐵路難題',
+  explore: '探索濕地四季', comparison: '濕地的四季',
+  seasons: ['春季', '夏季', '秋季', '冬季'],
+};
+
+async function assertMapsInViewport(grid) {
+  const shapes = grid.locator('svg, .map-station');
+  assert.equal(await shapes.count(), 12, 'Four maps with two stations each');
+  assert.ok(await shapes.evaluateAll(elements => elements.every(element => {
+    const { top, bottom, left, right, width, height } = element.getBoundingClientRect();
+    return width > 0 && height > 0 && top >= 0 && bottom <= innerHeight && left >= 0 && right <= innerWidth;
+  })), 'All four maps and their stations must fit on screen together');
+}
+
+for (const [locale, alternate] of [[english, traditionalChinese], [traditionalChinese, english]]) {
   test(`both assigned sites open a four-season comparison on a tablet in ${locale.language}`, { timeout: 30000 }, async (t) => {
     const { browser, issueCredential, origin } = await classroom(t);
     const teacher = await participant(browser);
@@ -228,12 +237,12 @@ for (const locale of [
     const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
 
     for (const site of ['A', 'B']) {
-      const viewport = site === 'A' ? { width: 820, height: 1180 } : { width: 1024, height: 768 };
+      const viewport = site === 'A' ? { width: 820, height: 1180 } : { width: 1024, height: 600 };
       const group = await participant(browser, { viewport, isMobile: true, hasTouch: true });
       await group.goto(joinUrl);
       await group.getByRole('button', { name: `${locale.choose} ${site}`, exact: true }).tap();
       await group.getByRole('heading', { name: locale.puzzle }).waitFor();
-      const entry = group.getByRole('link', { name: locale.explore, exact: true });
+      const entry = group.getByRole('button', { name: locale.explore, exact: true });
       const openingMap = entry.locator('svg');
       const landmarks = (map) => map.locator('.map-station, .map-river, .map-wetland')
         .evaluateAll(shapes => shapes.map(shape => shape.outerHTML));
@@ -247,21 +256,21 @@ for (const locale of [
         await openingMap.locator('.map-wetland').tap();
       } else {
         for (let tab = 0; tab < 3; tab++) await group.keyboard.press('Tab');
-        assert.ok(await entry.evaluate(link => link === document.activeElement));
+        assert.ok(await entry.evaluate(button => button === document.activeElement));
         await group.keyboard.press('Enter');
       }
       await group.getByRole('heading', { name: locale.comparison }).waitFor();
       assert.equal(await group.locator('html').getAttribute('lang'), locale.tag);
-      assert.match(await group.locator('.site-note').innerText(), new RegExp(`(?:Site|場地) ${site}`));
+      assert.ok((await group.locator('.site-note').innerText()).startsWith(`${locale.site} ${site}`));
       const grid = group.locator('.season-grid');
       assert.deepEqual(await grid.getByRole('heading').allTextContents(), locale.seasons);
+      await assertMapsInViewport(grid);
       const maps = await grid.getByRole('group').all();
       assert.equal(maps.length, 4);
       const habitatShapes = new Set();
       for (const map of maps) {
         assert.deepEqual(await landmarks(map), openingLandmarks);
         assert.equal(await map.getAttribute('viewBox'), '0 0 720 344');
-        assert.ok(await map.evaluate(svg => svg.getBoundingClientRect().bottom <= innerHeight));
         const habitat = map.locator('.map-habitat');
         assert.ok(Number(await habitat.getAttribute('y')) > wetlandY);
         habitatShapes.add(await habitat.evaluate(shape => shape.outerHTML));
@@ -275,19 +284,25 @@ for (const locale of [
       assert.ok(autumn.x < winter.x && autumn.y === winter.y && spring.y < autumn.y);
       assert.ok(await group.evaluate(() => document.documentElement.scrollWidth === innerWidth));
 
-      await group.getByRole('button', { name: locale.alternate, exact: true }).tap();
-      await group.waitForFunction(lang => document.documentElement.lang !== lang, locale.tag);
+      await group.getByRole('button', { name: alternate.language, exact: true }).tap();
+      await group.getByRole('heading', { name: alternate.comparison, exact: true }).waitFor();
+      assert.equal(await group.locator('html').getAttribute('lang'), alternate.tag);
+      assert.deepEqual(await grid.getByRole('heading').allTextContents(), alternate.seasons);
       assert.deepEqual(await landmarks(grid.getByRole('group').first()), openingLandmarks);
-      await group.getByRole('link', { name: /Back to the railway puzzle|返回鐵路難題/ }).tap();
-      await group.getByRole('heading', { name: /How would you get a railway across Long Valley\?|你會怎樣讓鐵路穿越塱原？/ }).waitFor();
-      assert.deepEqual(await landmarks(group.locator('.wetland-entry svg')), openingLandmarks);
+      const back = group.getByRole('link', { name: alternate.back, exact: true });
+      await back.tap();
+      await group.getByRole('heading', { name: alternate.puzzle, exact: true }).waitFor();
+      const translatedEntry = group.getByRole('button', { name: alternate.explore, exact: true });
+      assert.deepEqual(await landmarks(translatedEntry.locator('svg')), openingLandmarks);
 
       if (site === 'B') {
-        const autumnButton = group.getByRole('button', { name: /^(Autumn|秋季)$/ });
+        await group.setViewportSize({ width: 1024, height: 768 });
+        const autumnButton = group.getByRole('button', { name: alternate.seasons[2], exact: true });
         await autumnButton.tap();
-        await group.getByRole('link', { name: /^(Explore through the year|探索濕地四季)$/ }).tap();
+        await translatedEntry.tap();
         await grid.waitFor();
-        await group.getByRole('link', { name: /Back to the railway puzzle|返回鐵路難題/ }).tap();
+        await assertMapsInViewport(grid);
+        await back.tap();
         assert.equal(await autumnButton.getAttribute('aria-pressed'), 'true');
       }
       await group.close();
@@ -364,6 +379,28 @@ async function startInvestigation(t) {
 
   return { groupAt };
 }
+
+test('exploring the wetland preserves all draft choices and the last tested crossing', { timeout: 30000 }, async (t) => {
+  const { groupAt } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const alignment = group.getByLabel('Railway alignment');
+  const map = group.getByRole('group', { name: 'Spring site map' });
+  await alignment.selectOption('south');
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  const testedMap = await map.innerHTML();
+
+  const draft = [
+    [alignment, 'north'],
+    [group.getByLabel('Crossing type'), 'tunnel'],
+    [group.getByLabel('Construction access route', { exact: true }), 'valley'],
+    [group.getByLabel('Construction season', { exact: true }), 'winter'],
+  ];
+  for (const [control, value] of draft) await control.selectOption(value);
+  await group.getByRole('button', { name: english.explore, exact: true }).click();
+  await group.getByRole('link', { name: english.back, exact: true }).click();
+  for (const [control, value] of draft) assert.equal(await control.inputValue(), value);
+  assert.equal(await map.innerHTML(), testedMap);
+});
 
 test('both groups can draw a different alignment between the same two stations', { timeout: 30000 }, async (t) => {
   const { groupAt } = await startInvestigation(t);

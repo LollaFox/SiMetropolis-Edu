@@ -1,5 +1,4 @@
 const seasonInput = document.querySelector('#crossing-design [name="season"]');
-const exploreLink = document.querySelector('.wetland-entry');
 const seasonButtons = [...document.querySelectorAll('#season-buttons button')];
 const scene = document.querySelector('#season-scene');
 const scenes = new Map([[seasonInput.value, scene.firstElementChild]]);
@@ -26,10 +25,6 @@ function showSeason(season) {
   url.searchParams.delete('notice');
   url.hash = 'crossing-comparison';
   window.history.replaceState(null, '', url);
-
-  const exploreUrl = new URL(exploreLink.href);
-  exploreUrl.searchParams.set('season', season);
-  exploreLink.href = exploreUrl;
 }
 
 function pause() {
