@@ -364,6 +364,9 @@ class Handler(BaseHTTPRequestHandler):
             if opening_language not in views.LANGUAGES:
                 return Response(400)
             self.classroom.start(teacher, opening_language)
+            if self.server.lan is not None:
+                # An adapter lookup from the last class can still be in flight.
+                self.server.lan = ClassroomLan(self.server.server_port)
             return self.redirect("/teacher")
         if path == "/teacher/end":
             teacher = self.teacher_id()

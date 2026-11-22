@@ -58,12 +58,16 @@ function updateNetwork(joinUrl) {
     entry.search = new URL(joinUrl).search;
     codeLink.href = entry.href;
     joinLink.href = joinLink.textContent = joinUrl;
+  }
 
-    const qr = classroom.querySelector('[data-join-qr]');
+  const qr = classroom.querySelector('[data-join-qr]');
+  if (joinUrl && qr) {
     const source = new URL(qr.dataset.joinQr, window.location.origin);
     source.searchParams.set('join', joinUrl);
-    qr.removeAttribute('src');
-    qr.src = source.href;
+    if (qr.src !== source.href || (qr.complete && qr.naturalWidth === 0)) {
+      qr.removeAttribute('src');
+      qr.src = source.href;
+    }
   }
   networkNotice.hidden = Boolean(joinUrl);
   if (joinUrl && networkSettingsError) networkSettingsError.hidden = true;

@@ -479,6 +479,62 @@ test('a running class withdraws stale join information and projects the new addr
   await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
 });
 
+test('the projection retries a failed QR when the same address returns', { timeout: 30000 }, async (t) => {
+  const address = '192.0.2.10';
+  const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: address });
+  const teacher = await participant(browser);
+  await startConnectedClass(teacher, launchUrl, 'English');
+  const context = teacher.context();
+  const outage = teacher.getByText('The classroom network is unavailable. Edu is retrying automatically.');
+  // Deliver the first image request to the server after adapter discovery has detected the loss.
+  await context.route('**/qr.png?*', async route => {
+    await setNetworkAddress('');
+    await outage.waitFor({ timeout: 12000 });
+    await route.continue();
+  }, { times: 1 });
+  const [projector, failedQr] = await Promise.all([
+    teacher.waitForEvent('popup'),
+    context.waitForEvent('response', {
+      predicate: response => new URL(response.url()).pathname.endsWith('/qr.png'), timeout: 12000,
+    }),
+    teacher.getByRole('link', { name: 'Project join information' }).click(),
+  ]);
+  assert.equal(failedQr.status(), 503);
+  await projector.locator('[data-network-notice]').waitFor({ timeout: 12000 });
+  const originalLoad = await projector.evaluate(() => performance.timeOrigin);
+  await setNetworkAddress(address);
+  const joinLink = projector.locator('[data-join-link]');
+  await joinLink.waitFor({ timeout: 12000 });
+  await projector.waitForFunction(() => document.querySelector('[data-join-qr]').naturalWidth > 0,
+    undefined, { timeout: 5000 });
+  assert.equal(await readQr(projector), await joinLink.getAttribute('href'));
+  assert.equal(await projector.evaluate(() => performance.timeOrigin), originalLoad);
+});
+
+for (const [previousAddress, newAddress] of [['192.0.2.10', ''], ['', '192.0.2.10']]) {
+  test(`a new ${newAddress ? 'connected' : 'offline'} class checks the current adapter on its first poll`, async t => {
+    const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: previousAddress });
+    const teacher = await participant(browser);
+    await teacher.goto(launchUrl.href);
+    const start = teacher.getByRole('button', { name: 'Start class' });
+    const project = teacher.getByRole('link', { name: 'Project join information' });
+    const outage = teacher.getByText('The classroom network is unavailable. Edu is retrying automatically.');
+    await start.click();
+    await (previousAddress ? project : outage).waitFor();
+    await teacher.getByRole('button', { name: 'End class' }).click();
+    await setNetworkAddress(newAddress);
+    const [firstPoll] = await Promise.all([
+      teacher.waitForResponse(response => response.url().endsWith('/status?network=1')),
+      start.click(),
+    ]);
+    assert.equal(firstPoll.status(), 204);
+    const joinUrl = await firstPoll.headerValue('x-join-url');
+    assert.equal(joinUrl ? new URL(joinUrl).hostname : '', newAddress);
+    await (newAddress ? project : outage).waitFor();
+    assert.equal(await (newAddress ? outage : project).isVisible(), false);
+  });
+}
+
 test('a class that expires during an outage stays closed after the network returns', lanTest, async (t) => {
   const lanAddress = lanAddresses[0];
   const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, {
