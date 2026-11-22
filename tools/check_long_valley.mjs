@@ -477,7 +477,7 @@ test('a second launcher preserves the first teacher session in the same browser'
 });
 
 test('reopening the launcher returns to the live lesson and the group keeps its crossing', lanTest, async (t) => {
-  const { browser, launchUrl, relaunch } = await launchClassroom(t, { shortcut: Boolean(nativeShortcut) });
+  const { browser, launchUrl, relaunch } = await launchClassroom(t, { shortcut: hasNativeShortcut });
   const teacher = await participant(browser);
   await startConnectedClass(teacher, launchUrl, 'English');
   const projector = await openProjection(teacher);
