@@ -80,7 +80,8 @@ def spring_investigation(session, group, notice):
       name="save" value="1">{t["save"]}</button>"""
     return f"""<section class="investigation" id="spring-investigation" aria-labelledby="spring-title">
   <h3 id="spring-title">{t["spring"]}</h3>
-  <form class="crossing-controls" id="crossing-design" action="/join/{session.code}/view?lang={group.language}" method="post">
+  <form class="crossing-controls" id="crossing-design" action="/join/{session.code}/view?lang={group.language}"
+    method="post" autocomplete="off">
     <input type="hidden" name="revision" value="{group.revision}">
     <input type="hidden" name="site" value="{group.site}">
     {select_control("alignment", ALIGNMENTS, draft.alignment, t)}

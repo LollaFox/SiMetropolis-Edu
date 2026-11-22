@@ -5,6 +5,7 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
+from time import monotonic
 from typing import Union
 from urllib.parse import parse_qs
 
@@ -17,6 +18,7 @@ from .state import Classroom, ClassSession
 
 
 STATIC = Path(__file__).with_name("static")
+SWAP_WAIT_SECONDS = 15
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
@@ -29,10 +31,15 @@ class Response:
     body: Union[str, bytes] = ""
     headers: tuple = ()
     content_type: str = "text/html; charset=utf-8"
+    cache_control: str = "no-store"
 
 
-def student_join_path(session):
-    return f"/join/{session.code}?lang={session.language}"
+def student_join_path(session, *, language=None):
+    return f"/join/{session.code}?lang={language or session.language}"
+
+
+def group_assignment(group):
+    return Response(204, headers=(("X-Current-Site", group.site),))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,11 +52,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", response.content_type)
         if response.status != 204:
             self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", response.cache_control)
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy",
-                         "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+                         "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; "
+                         f"script-src 'self' 'sha256-{views.GROUP_STATUS_SCRIPT_HASH}'")
         for name, value in response.headers:
             self.send_header(name, value)
         self.end_headers()
@@ -91,6 +99,12 @@ class Handler(BaseHTTPRequestHandler):
             headers.append(("Set-Cookie", cookie))
         return Response(303, headers=tuple(headers))
 
+    def closed_join(self, code, language, *, override=None):
+        preferred = override if override in views.LANGUAGES else self.cookie_value("group_language")
+        return Response(410, views.unavailable(
+            preferred if preferred in views.LANGUAGES else language, join_code=code,
+        ))
+
     def request_target(self):
         path, _, query = self.path.partition("?")
         fields = parse_qs(query, keep_blank_values=True)
@@ -102,9 +116,35 @@ class Handler(BaseHTTPRequestHandler):
         if path in ASSETS:
             name, content_type = ASSETS[path]
             return self.respond(Response(200, (STATIC / name).read_bytes(), content_type=content_type))
+        if path.startswith("/join/") and path.endswith("/status"):
+            code = path.removeprefix("/join/").removesuffix("/status")
+            response = self.group_status(code, wait_for_swap=fields.get("wait") == ["swap"])
+            try:
+                return self.respond(response)
+            except (BrokenPipeError, ConnectionResetError):
+                # A group can leave the page while the request is waiting for a swap.
+                return
         with self.classroom.lock:
             response = self.get_page(path, language, fields)
         self.respond(response)
+
+    def group_status(self, code, *, wait_for_swap):
+        with self.classroom.lock:
+            session = self.classroom.active_class(code)
+            if session is None:
+                return Response(410)
+            group = session.groups.get(self.cookie_value("group_session"))
+            if group is None:
+                return Response(403)
+            if not wait_for_swap or session.swapped:
+                return group_assignment(group)
+            timeout = min(SWAP_WAIT_SECONDS, session.expires_at - monotonic())
+
+        session.swap_or_end.wait(timeout)
+        with self.classroom.lock:
+            if self.classroom.active_class(code) is None:
+                return Response(410)
+            return group_assignment(group)
 
     def get_page(self, path, language, fields):
         if path == "/":
@@ -128,10 +168,19 @@ class Handler(BaseHTTPRequestHandler):
             code = path.removeprefix("/join/")
             session = self.classroom.active_class(code)
             if session is None:
-                return Response(410, views.unavailable(language, join_code=code))
+                override = fields.get("closed-language", [""])[0]
+                return self.closed_join(code, language, override=override)
             group = session.groups.get(self.cookie_value("group_session"))
             if group:
-                return Response(200, views.group_opening(session, group, notice=fields.get("notice", [""])[0]))
+                # Browser history can reuse the hidden page while offline.
+                # Ordinary requests revalidate, and the controls still wait for an assignment.
+                return Response(
+                    200, views.group_opening(
+                        session, group, swap_wait_seconds=SWAP_WAIT_SECONDS,
+                        notice=fields.get("notice", [""])[0],
+                    ),
+                    headers=(("Vary", "Cookie"),), cache_control="private, no-cache",
+                )
             return Response(200, views.choose_site(session, taken="taken" in fields))
         if path.startswith("/classes/"):
             code, _, action = path.removeprefix("/classes/").partition("/")
@@ -224,10 +273,10 @@ class Handler(BaseHTTPRequestHandler):
     def group_action(self, code, action, language, fields):
         session = self.classroom.active_class(code)
         if session is None:
-            return Response(410, views.unavailable(language, join_code=code))
-        join_path = student_join_path(session)
+            return self.closed_join(code, language)
         group = session.groups.get(self.cookie_value("group_session"))
         if action == "take-site":
+            join_path = student_join_path(session)
             if group:
                 return self.redirect(join_path)
             token = session.take_site(fields.get("site", [""])[0])
@@ -250,13 +299,16 @@ class Handler(BaseHTTPRequestHandler):
 
         anchor = "#spring-comparison"
         notice = ""
+        language_cookie = None
         if action == "language":
             preferred = fields.get("language", [""])[0]
             if preferred not in views.LANGUAGES:
                 return Response(400)
             group.language = preferred
+            language_cookie = self.session_cookie("group_language", preferred, f"/join/{code}")
             anchor = ""
 
+        join_path = student_join_path(session, language=group.language if session.swapped else None)
         if action == "share":
             comparison = group.rendered_comparisons.get(fields.get("comparison", [""])[0])
             if comparison is None:
@@ -269,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # A language preference travels with the group. Design and view actions belong to the site.
         if not current_site:
-            return self.redirect(f"{join_path}&notice=swapped#current-site")
+            return self.redirect(f"{join_path}&notice=swapped#current-site", language_cookie)
         if action == "design":
             group.tested_design = draft
             group.show_works = True
@@ -288,7 +340,7 @@ class Handler(BaseHTTPRequestHandler):
                 notice = "&notice=replayed"
         group.draft_design = draft
         group.revision += 1
-        return self.redirect(f"{join_path}{notice}{anchor}")
+        return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
 
 
 def run(host, port, public_url, duration_seconds, credentials):

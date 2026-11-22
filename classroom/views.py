@@ -1,11 +1,18 @@
 """Localized HTML for the classroom."""
 
+from base64 import b64encode
+from hashlib import sha256
 from html import escape
+from pathlib import Path
 from urllib.parse import quote
 
 from .investigation_views import design_summary, projected_maps, spring_investigation
 from .localization import words
 from .state import CODE_LENGTH, SITES
+
+
+GROUP_STATUS_SCRIPT = Path(__file__).with_name("static").joinpath("load-class-status.js").read_text(encoding="utf-8")
+GROUP_STATUS_SCRIPT_HASH = b64encode(sha256(GROUP_STATUS_SCRIPT.encode()).digest()).decode()
 
 
 LANGUAGES = {"en": "English", "zh-Hant": "繁體中文"}
@@ -34,6 +41,8 @@ COPY = {
     "pass_waiting": ("Both groups need to join before you can swap sites.", "兩組都加入課堂後，便可交換場地。"),
     "pass_done": ("Both groups have moved to their partner sites.", "兩組已到達對方的場地。"),
     "partner_site": ("You’re at your partner site. Try your crossing here.", "你們已到達對方的場地。試試你們的走線吧。"),
+    "checking_site": ("Checking your current site…", "正在確認你們的場地⋯"),
+    "opening_partner": ("Opening your partner site…", "正在開啟對方的場地⋯"),
     "end": ("End class", "結束課堂"),
     "sign_out": ("Sign out", "登出"),
     "join_title": ("Join the Long Valley class", "加入塱原課堂"),
@@ -61,13 +70,14 @@ COPY = {
 }
 
 
-def page(language, title, content, *, layout="", session=None, teacher_only=False, watch_swap=False):
+def page(language, title, content, *, layout="", session=None, teacher_only=False, joined=False):
     name = words(language, COPY)["name"]
     status_base = "/teacher/project" if teacher_only else "/classes"
+    if joined:
+        status_base = "/join"
     status = f' data-class-status="{status_base}/{session.code}/status"' if session else ""
-    if watch_swap:
-        status += f' data-sites-swapped="{str(session.swapped).lower()}"'
-    script = '<script src="/class-status.js" defer></script>' if session else ""
+    script = '<script src="/class-status.js" defer></script>' if session and not joined else ""
+    bootstrap = f"<script>{GROUP_STATUS_SCRIPT}</script>" if joined else ""
     return f"""<!doctype html>
 <html lang="{language}">
 <head>
@@ -80,6 +90,7 @@ def page(language, title, content, *, layout="", session=None, teacher_only=Fals
 <body>
   <header class="masthead"><a href="/?lang={language}">{name}</a></header>
   <main class="{layout}"{status}>{content}</main>
+  {bootstrap}
 </body>
 </html>"""
 
@@ -88,9 +99,9 @@ def alternate_language(language):
     return "zh-Hant" if language == "en" else "en"
 
 
-def language_link(path, language):
+def language_link(path, language, *, parameter="lang"):
     alternate = alternate_language(language)
-    return f'<a href="{path}?lang={alternate}" lang="{alternate}">{LANGUAGES[alternate]}</a>'
+    return f'<a href="{path}?{parameter}={alternate}" lang="{alternate}">{LANGUAGES[alternate]}</a>'
 
 
 def language_button(path, language):
@@ -260,7 +271,7 @@ def unavailable(language, *, join_code=None):
     t = words(language, COPY)
     switch = ""
     if join_code is not None:
-        switch = language_link(f"/join/{quote(join_code, safe='')}", language)
+        switch = language_link(f"/join/{quote(join_code, safe='')}", language, parameter="closed-language")
     return page(language, t["unavailable"], f"""
 <section class="panel">
   <h1>{t["unavailable"]}</h1>
@@ -297,12 +308,17 @@ def choose_site(session, taken=False):
 </section>""", layout="wide", session=session)
 
 
-def group_opening(session, group, *, notice=""):
+def group_opening(session, group, *, swap_wait_seconds, notice=""):
     language, site = group.language, group.site
     t = words(language, COPY)
     handoff = f'<p class="experiment-status">{t["partner_site"]}</p>' if session.swapped else ""
+    waiting = (
+        f'<p class="panel" role="status" data-site-check="{t["checking_site"]}" '
+        f'data-site-opening="{t["opening_partner"]}">{t["checking_site"]}</p>'
+    )
     return page(language, t["puzzle"], f"""
-<section class="panel">
+{waiting}
+<section class="panel" data-group-site="{site}" data-swap-wait="{0 if session.swapped else swap_wait_seconds}" hidden>
   <div class="opening">
     <h1>{t["puzzle"]}</h1>
     {language_button(f"/join/{session.code}/language", language)}
@@ -315,4 +331,4 @@ def group_opening(session, group, *, notice=""):
     <p>{t["site_" + site]}</p>
     {spring_investigation(session, group, notice)}
   </section>
-</section>""", layout="wide", session=session, watch_swap=True)
+</section>""", layout="wide", session=session, joined=True)
