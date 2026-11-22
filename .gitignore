@@ -1,4 +1,5 @@
 /backend/.data/
+/classroom/.data/
 __pycache__/
 *.pyc
 

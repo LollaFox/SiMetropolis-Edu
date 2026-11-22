@@ -1,5 +1,7 @@
 # Northern Metropolis · Integrated Frontend and Backend Product
 
+The [Long Valley classroom](classroom/README.md) runs the SiMetropolis Edu railway opening in Traditional Chinese and English.
+
 This directory is a standalone runnable version. It uses the new frontend from `D:/Metropolis/Front/northern-metropolis-white-model` and brings in the earlier dual-scenario setup, the fiscal and resident model, and the government large-model capability. The source directories stay as they are, so you do not need to switch between two projects.
 
 ## Start
