@@ -1,8 +1,10 @@
 # Long Valley classroom
 
+On macOS 12 or later, extract `SiMetropolis-Edu-Mac.zip` and double-click **Open SiMetropolis Edu**. The first launch downloads about 24 MB. If the download stops, check your connection and select **Retry**. After setup, you can open lesson preparation while disconnected.
+
 On Windows, extract `SiMetropolis-Edu-Windows.zip` to a local folder and double-click **Open SiMetropolis Edu**. Keep the computer connected to the internet for first-use setup. The launcher shows download progress and offers **Retry** if a download is interrupted. After setup, you can open the same copy while disconnected.
 
-On a prepared Mac, double-click **Open SiMetropolis Edu** (`.command`).
+On a prepared Mac checkout, double-click **Open SiMetropolis Edu** (`.command`).
 
 The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
@@ -92,3 +94,13 @@ The prepared-shortcut checks on Mac and Windows use a temporary virtual environm
 The spring investigation checks cover alignment changes, bridge supports and tunnel entrances drawn on the map, and inspection of overlap evidence by pointer and keyboard. They also exercise the paired sites, the no-works comparison, replay, reset, and language switching with a design still being edited.
 
 The sharing checks verify in both languages that a teacher can project the original maps and evidence after the group changes its crossing, replays, and resets. They also verify that a new share leaves the selected projection in place and that comparisons are private to the class teacher.
+
+## Building and verifying the Mac download
+
+Use macOS with Xcode selected and Python 3 with pip. To create the ZIP for local testing, run `python3 tools/build_mac_classroom.py /tmp/SiMetropolis-Edu-Mac.zip`. The app includes both Mac architectures and the classroom’s Python dependencies. It downloads a pinned [standalone Python runtime](https://github.com/astral-sh/python-build-standalone/releases/tag/20261110) for the current architecture, verifies its SHA-256, and keeps it in the teacher’s Application Support folder.
+
+Pass `--signing-identity "Developer ID Application: …"` and `--notary-profile PROFILE` together to build the distribution ZIP. The script signs the app, submits it to Apple, and packages it with the stapled ticket. It extracts the final ZIP and checks the ticket, signature, and Gatekeeper assessment. Link the signed and notarized ZIP from the project download page after verifying it on a clean Mac. See [Apple's distribution testing guidance](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
+
+Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and repeats with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
+
+To check the distribution ZIP, download it in a browser on a clean Mac, extract it in Finder, and double-click **Open SiMetropolis Edu**. Interrupt the runtime transfer and verify **Retry** opens the private teacher page after reconnecting. Quit the launcher, disconnect Wi-Fi and Ethernet, and double-click the same app again. Lesson preparation should open in the browser.
