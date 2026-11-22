@@ -7,12 +7,21 @@ from threading import Lock
 from time import monotonic
 from typing import Optional
 
-from .investigation import Design
+from .investigation import Comparison, Design
 
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LENGTH = 8
 SITES = ("A", "B")
+
+
+def record_comparison(collection, comparison):
+    for key, previous in collection.items():
+        if previous == comparison:
+            return key
+    key = str(len(collection) + 1)
+    collection[key] = comparison
+    return key
 
 
 class TeacherCredentials:
@@ -42,9 +51,16 @@ class Group:
     tested_design: Design = field(default_factory=Design)
     show_works: bool = True
     saved_design: Optional[Design] = None
+    revision: int = 0
+    rendered_comparisons: dict = field(default_factory=dict)
+
+    def capture_comparison(self):
+        comparison = Comparison(self.site, self.tested_design)
+        return record_comparison(self.rendered_comparisons, comparison), comparison
 
     def move_to_partner_site(self, site):
         self.site = site
+        self.revision += 1
         if self.saved_design is not None:
             self.tested_design = self.saved_design
         self.draft_design = self.tested_design
@@ -59,6 +75,7 @@ class ClassSession:
     expires_at: float
     groups: dict = field(default_factory=dict)
     swapped: bool = False
+    comparisons: dict = field(default_factory=dict)
 
     def occupied_sites(self):
         return {group.site for group in self.groups.values()}
@@ -69,6 +86,9 @@ class ClassSession:
         token = secrets.token_urlsafe(32)
         self.groups[token] = Group(site, self.language)
         return token
+
+    def share_comparison(self, comparison):
+        record_comparison(self.comparisons, comparison)
 
     def pass_the_city(self):
         if self.swapped:

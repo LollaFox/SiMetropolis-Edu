@@ -3,7 +3,7 @@
 from html import escape
 from urllib.parse import quote
 
-from .investigation_views import spring_investigation
+from .investigation_views import design_summary, projected_maps, spring_investigation
 from .localization import words
 from .state import CODE_LENGTH, SITES
 
@@ -23,6 +23,11 @@ COPY = {
     "open": ("Your class is open", "課堂已開啟"),
     "project": ("Project join information", "投影加入資訊"),
     "project_help": ("Open the join information in this browser and show that tab on the projector.", "請在此瀏覽器開啟加入資訊，並將該分頁投影給小組。"),
+    "shared_comparisons": ("Shared comparisons", "已分享的比較結果"),
+    "select_comparison": ("Choose a comparison to show on the projector.", "選擇要投影的比較結果。"),
+    "no_comparisons": ("No group has shared a comparison yet.", "暫時沒有小組分享比較結果。"),
+    "back_to_comparisons": ("Back to shared comparisons", "返回已分享的比較結果"),
+    "spring_construction": ("Spring · Construction", "春季 · 施工階段"),
     "pass_the_city": ("Pass the City", "交換場地"),
     "pass_help": ("Ask both groups to save a crossing, then send them to their partner sites.",
                   "請兩組各自儲存走線，然後讓兩組交換場地。"),
@@ -56,9 +61,10 @@ COPY = {
 }
 
 
-def page(language, title, content, *, layout="", session=None, watch_swap=False):
+def page(language, title, content, *, layout="", session=None, teacher_only=False, watch_swap=False):
     name = words(language, COPY)["name"]
-    status = f' data-class-status="/classes/{session.code}/status"' if session else ""
+    status_base = "/teacher/project" if teacher_only else "/classes"
+    status = f' data-class-status="{status_base}/{session.code}/status"' if session else ""
     if watch_swap:
         status += f' data-sites-swapped="{str(session.swapped).lower()}"'
     script = '<script src="/class-status.js" defer></script>' if session else ""
@@ -130,7 +136,10 @@ def teacher(language, session=None, *, notice=""):
 <section class="panel">
   <h1>{t["open"]}</h1>
   <p>{t["project_help"]}</p>
-  <a class="button" href="/teacher/project/{session.code}" target="_blank" rel="noopener">{t["project"]}</a>
+  <div class="teacher-actions">
+    <a class="button" href="/teacher/project/{session.code}" target="_blank" rel="noopener">{t["project"]}</a>
+    <a class="button secondary" href="{comparison_url(session)}" target="_blank" rel="noopener">{t["shared_comparisons"]}</a>
+  </div>
   {pass_the_city_controls(session, t, notice)}
   <div class="teacher-actions">
     <form class="inline" action="/teacher/end?lang={language}" method="post">
@@ -138,7 +147,7 @@ def teacher(language, session=None, *, notice=""):
     </form>
     {sign_out}
   </div>
-</section>""", session=session)
+</section>""", session=session, teacher_only=True)
     options = "".join(
         f'<option value="{value}" lang="{value}"{" selected" if value == language else ""}>{label}</option>'
         for value, label in LANGUAGES.items()
@@ -180,9 +189,55 @@ def projection(session, url):
     <code>{session.code}</code>
     <p><a class="join-url" href="{escape(url, quote=True)}">{escape(url)}</a></p>
     <p>{t["enter_code"]} <a class="join-url" href="{code_entry}?lang={language}">{code_entry}</a></p>
+    <p><a href="{comparison_url(session)}">{t["shared_comparisons"]}</a></p>
   </div>
   <img class="join-qr" src="/teacher/project/{session.code}/qr.png" alt="{t["qr"]}">
-</section>""", layout="wide", session=session)
+</section>""", layout="wide", session=session, teacher_only=True)
+
+
+def comparison_url(session, entry=""):
+    path = f"/teacher/project/{session.code}/comparisons"
+    if entry:
+        path += f"/{entry}"
+    return f"{path}?lang={session.language}"
+
+
+def comparison_choices(session):
+    t = words(session.language, COPY)
+    return "".join(
+        f'<li><a href="{comparison_url(session, key)}"><strong>{t[comparison.site]}</strong>'
+        f'<span>{design_summary(comparison.design, session.language)}</span></a></li>'
+        for key, comparison in session.comparisons.items()
+    )
+
+
+def shared_comparisons(session):
+    language = session.language
+    t = words(language, COPY)
+    return page(language, t["shared_comparisons"], f"""
+<section class="panel">
+  <a href="/teacher/project/{session.code}">{t["project"]}</a>
+  <h1>{t["shared_comparisons"]}</h1>
+  <p>{t["select_comparison"]}</p>
+  <ul class="comparison-list" data-comparison-feed="{comparison_url(session, "feed")}"
+    aria-live="polite" aria-label="{t["shared_comparisons"]}">{comparison_choices(session)}</ul>
+  <p class="empty-comparisons">{t["no_comparisons"]}</p>
+</section>""", layout="wide", session=session, teacher_only=True)
+
+
+def comparison_projection(session, comparison):
+    language = session.language
+    t = words(language, COPY)
+    return page(language, t[comparison.site], f"""
+<section class="panel projected-comparison">
+  <a href="{comparison_url(session)}">{t["back_to_comparisons"]}</a>
+  <h1>{t[comparison.site]}</h1>
+  <div class="comparison-metadata">
+    <p><strong>{t["spring_construction"]}</strong> · {t["imagined"]}</p>
+    <p>{design_summary(comparison.design, language)}</p>
+  </div>
+  {projected_maps(comparison, language)}
+</section>""", layout="wide comparison-screen", session=session, teacher_only=True)
 
 
 def find_class(language):

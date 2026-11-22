@@ -40,6 +40,19 @@ button:disabled { background: #e4e8df; border-color: #c5d2bf; color: #58675e; cu
 .secondary:hover { background: #e0ebdd; }
 .teacher-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-top: 1.75rem; }
 form.inline { display: inline-flex; margin: 0; }
+.comparison-list { display: grid; gap: .65rem; padding: 0; margin: 1.3rem 0; list-style: none; }
+.comparison-list a { display: grid; gap: .15rem; padding: .75rem 1rem; border: 1px solid #c5d2bf; border-radius: .5rem; }
+.comparison-list a:hover { background: #edf0e4; }
+.comparison-list span { color: #19382d; }
+.comparison-list:not(:empty) + .empty-comparisons { display: none; }
+.comparison-screen { max-width: 90rem; margin-block: 0; padding-block: .75rem; }
+.projected-comparison { padding: 1rem clamp(1rem, 3vw, 2rem); }
+.projected-comparison h1 { margin-top: .5rem; font-size: clamp(1.8rem, 3.3vw, 2.5rem); }
+.comparison-metadata { display: flex; flex-wrap: wrap; gap: .25rem 1.5rem; margin-top: .4rem; }
+.comparison-metadata p { margin: 0; }
+.comparison-maps { display: grid; gap: 1.25rem; }
+.comparison-maps h2 { margin: .85rem 0 .55rem; }
+.comparison-maps .map-key { font-size: 1rem; }
 .end { border-color: #944332; background: transparent; color: #883b29; }
 .end:hover { background: #f3e4d9; }
 .site { margin-top: 1.3rem; }
@@ -80,7 +93,7 @@ form.inline { display: inline-flex; margin: 0; }
 .map-supports, .map-entrances { fill: #3c4052; stroke: #fffdf4; stroke-width: 1px; }
 .map-entrances { rx: 4px; }
 .map-overlap-hit { fill: transparent; stroke: transparent; stroke-width: 20px; vector-effect: non-scaling-stroke; }
-.map-overlap { fill: url(#footprint-overlap); stroke: #852d18; stroke-width: 1.5px; }
+.map-overlap { stroke: #852d18; stroke-width: 1.5px; }
 .site-map a:hover .map-overlap, .site-map a:focus-visible .map-overlap { stroke: #411c0f; stroke-width: 3px; }
 .map-station { fill: #213f34; stroke: white; stroke-width: 2px; }
 .map-key { display: flex; flex-wrap: wrap; gap: .35rem 1rem; padding: 0; margin: .65rem 0; list-style: none; font-size: .9rem; }
@@ -103,6 +116,11 @@ form.inline { display: inline-flex; margin: 0; }
 .finding li:target { background: #fffdf4; font-weight: 700; outline: 2px solid #852d18; outline-offset: 2px; }
 .model-rule { margin-top: .9rem; }
 summary { cursor: pointer; }
+
+@media (min-width: 52rem) {
+  .comparison-maps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .comparison-maps .site-map text { font-size: 20px; }
+}
 
 @media (min-width: 62rem) {
   .investigation { display: grid; grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr); column-gap: 1.3rem; }

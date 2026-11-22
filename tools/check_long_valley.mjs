@@ -52,9 +52,9 @@ async function openClass(page, origin, credential, language = 'English') {
 }
 
 async function participant(browser) {
-  const page = await browser.newPage();
-  page.setDefaultTimeout(5000);
-  return page;
+  const context = await browser.newContext();
+  context.setDefaultTimeout(5000);
+  return context.newPage();
 }
 
 async function openProjection(teacher) {
@@ -258,22 +258,22 @@ test('an expired Traditional Chinese class closes for joined groups and rejects 
   await group.getByRole('heading', { name: 'This class is closed' }).waitFor();
 });
 
-async function startInvestigation(t) {
+async function startInvestigation(t, language = 'English') {
   const { browser, issueCredential, origin } = await classroom(t);
   const teacher = await participant(browser);
-  await openClass(teacher, origin, issueCredential());
+  await openClass(teacher, origin, issueCredential(), language);
   const projector = await openProjection(teacher);
   const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
 
   async function groupAt(site) {
     const group = await participant(browser);
     await group.goto(joinUrl);
-    await group.getByRole('button', { name: `Choose Site ${site}` }).click();
-    await group.getByRole('heading', { name: `Site ${site}:`, exact: false }).waitFor();
+    await group.getByRole('button', { name: new RegExp(`^(?:Choose Site|選擇場地) ${site}$`) }).click();
+    await group.getByRole('heading', { name: new RegExp(`^(?:Site|場地) ${site}[:：]`) }).waitFor();
     return group;
   }
 
-  return { groupAt, joinUrl, teacher };
+  return { teacher, projector, groupAt, joinUrl, origin, issueCredential };
 }
 
 test('both groups can draw a different alignment between the same two stations', { timeout: 30000 }, async (t) => {
@@ -332,6 +332,7 @@ test('each striped map location opens its own evidence by pointer or keyboard', 
     const access = map.getByRole('link', { name: labels.access });
     const supports = map.getByRole('link', { name: labels.supports });
     assert.equal(await map.getByRole('link').count(), 2);
+    assert.equal(await access.getAttribute('href'), '#evidence-access');
 
     // At this width the left edge of the access stripe is near the bridge support.
     await access.scrollIntoViewIfNeeded();
@@ -471,6 +472,186 @@ test('switching language preserves the untested draft, baseline and last tested 
   await group.getByRole('list', { name: 'Map key' }).getByText('Bridge supports', { exact: true }).waitFor();
 });
 
+function rectangleGeometry(rectangles) {
+  return rectangles.evaluateAll(elements => elements.map(rect => {
+    const { x, y, width, height } = rect.getBBox();
+    return { x, y, width, height };
+  }));
+}
+
+for (const labels of [
+  {
+    language: 'English', gallery: 'Shared comparisons', empty: 'No group has shared a comparison yet.',
+    choose: 'Choose Site', siteA: 'Site A: Central wetland', siteB: 'Site B: Riverside wetland',
+    share: 'Share comparison', shared: 'Comparison shared with your teacher.',
+    proposed: 'With proposed works', baseline: 'Without proposed works', context: 'Spring · Construction',
+    design: 'Central crossing · Tunnel · Valley approach', replayed: 'Crossing replayed.',
+    evidence: 'Construction access route overlaps modelled nesting habitat.',
+    inspectAccess: 'Inspect overlap for Construction access route', back: 'Back to shared comparisons',
+  },
+  {
+    language: '繁體中文', gallery: '已分享的比較結果', empty: '暫時沒有小組分享比較結果。',
+    choose: '選擇場地', siteA: '場地 A：中央濕地', siteB: '場地 B：河畔濕地',
+    share: '分享比較結果', shared: '已與老師分享比較結果。',
+    proposed: '有擬議工程', baseline: '無擬議工程', context: '春季 · 施工階段',
+    design: '中央走線 · 隧道 · 谷中通道', replayed: '已重播走線測試。',
+    evidence: '施工通道與模型中的築巢生境重疊。',
+    inspectAccess: '查看施工通道的重疊範圍', back: '返回已分享的比較結果',
+  },
+]) {
+  test(`the teacher can project the original shared comparison in ${labels.language}`, { timeout: 30000 }, async (t) => {
+    const { browser, issueCredential, origin } = await classroom(t);
+    const [teacher, groupA, groupB, otherTeacher] = await Promise.all(
+      Array.from({ length: 4 }, () => participant(browser)),
+    );
+    await openClass(teacher, origin, issueCredential(), labels.language);
+    const projector = await openProjection(teacher);
+    const joinUrl = await projector.getByRole('link', { name: /\/join\// }).getAttribute('href');
+    await projector.getByRole('link', { name: labels.gallery }).click();
+    await projector.getByText(labels.empty).waitFor();
+    const galleryUrl = projector.url();
+    const choices = projector.getByRole('list', { name: labels.gallery });
+    const feedUrl = await choices.getAttribute('data-comparison-feed');
+
+    await groupA.goto(joinUrl);
+    await groupA.getByRole('button', { name: `${labels.choose} A` }).click();
+    const alignment = groupA.getByLabel(/Railway alignment|鐵路走線/);
+    const testCrossing = groupA.getByRole('button', { name: /Test crossing|測試走線/ });
+    await groupA.getByLabel(/Crossing type|鐵路形式/).selectOption('tunnel');
+    await groupA.getByRole('combobox', { name: /Construction access route|施工通道/ }).selectOption('valley');
+    await testCrossing.click();
+    const access = groupA.locator('.site-map rect.map-access');
+    const originalAccess = await rectangleGeometry(access);
+    assert.equal(originalAccess.length, 3);
+    await groupA.getByRole('button', { name: labels.baseline }).click();
+    await alignment.selectOption('south');
+    await groupA.getByRole('button', { name: labels.share }).click();
+    await groupA.getByRole('status').getByText(labels.shared).waitFor();
+    assert.equal(await groupA.getByRole('button', { name: labels.baseline }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await alignment.inputValue(), 'south');
+
+    const shared = choices.getByRole('link', { name: new RegExp(labels.siteA) });
+    await shared.getByText(labels.design, { exact: true }).waitFor();
+    assert.equal(projector.url(), galleryUrl);
+    assert.equal(await projector.getByRole('heading', { name: labels.baseline }).count(), 0);
+
+    await testCrossing.click();
+    assert.notDeepEqual(await rectangleGeometry(access), originalAccess);
+    await groupA.getByRole('button', { name: /Replay crossing|重播走線測試/ }).click();
+    await groupA.getByRole('status').getByText(labels.replayed).waitFor();
+    await groupA.getByRole('button', { name: /Reset crossing|重設走線/ }).click();
+    assert.equal(await alignment.inputValue(), 'central');
+
+    await shared.click();
+    await projector.getByRole('heading', { name: labels.siteA, exact: true }).waitFor();
+    await projector.getByText(labels.context, { exact: true }).waitFor();
+    await projector.getByText(labels.design, { exact: true }).waitFor();
+    const proposed = projector.getByRole('region', { name: labels.proposed });
+    const baseline = projector.getByRole('region', { name: labels.baseline });
+    await proposed.getByText(labels.evidence, { exact: true }).waitFor();
+    assert.equal(await baseline.locator('.map-railway').count(), 0);
+    assert.equal(await proposed.locator('.map-entrances:visible').count(), 2);
+    assert.deepEqual(await rectangleGeometry(proposed.locator('.map-access')), originalAccess);
+    await proposed.getByRole('link', { name: labels.inspectAccess }).click();
+    await proposed.locator('li:target:focus').filter({ hasText: labels.evidence }).waitFor();
+    const selectedUrl = projector.url();
+
+    await groupB.goto(joinUrl);
+    await groupB.getByRole('button', { name: `${labels.choose} B` }).click();
+    await groupB.getByRole('button', { name: labels.share }).click();
+    await groupB.getByRole('status').getByText(labels.shared).waitFor();
+    await projector.reload();
+    await proposed.getByText(labels.evidence, { exact: true }).waitFor();
+    assert.equal(projector.url(), selectedUrl);
+    await projector.getByRole('link', { name: labels.back }).click();
+    await choices.getByRole('link', { name: new RegExp(labels.siteB) }).click();
+    await projector.getByRole('heading', { name: labels.siteB, exact: true }).waitFor();
+
+    await openClass(otherTeacher, origin, issueCredential(), labels.language);
+    const otherProjector = await openProjection(otherTeacher);
+    await otherProjector.getByRole('link', { name: labels.gallery }).click();
+    await otherProjector.getByText(labels.empty).waitFor();
+    for (const page of [groupA, otherProjector]) {
+      for (const url of [galleryUrl, feedUrl, selectedUrl]) {
+        assert.equal(await page.evaluate(async (path) => (await fetch(path)).status, url), 403);
+      }
+    }
+  });
+}
+
+async function projectSiteAComparison(projector) {
+  await projector.getByRole('link', { name: /Shared comparisons|已分享的比較結果/ }).click();
+  const galleryUrl = projector.url();
+  await projector.getByRole('link', { name: /Site A:|場地 A：/ }).click();
+  await projector.getByRole('heading', { name: /Site A:|場地 A：/ }).waitFor();
+  return galleryUrl;
+}
+
+test('sharing from an older group tab captures its displayed crossing and preserves the newer draft', { timeout: 30000 }, async (t) => {
+  const { groupAt, projector } = await startInvestigation(t);
+  const older = await groupAt('A');
+  await older.getByLabel('Construction access route', { exact: true }).selectOption('valley');
+  await older.getByRole('button', { name: 'Test crossing' }).click();
+  await older.getByRole('list', { name: 'Map key' }).getByText('Bridge supports').waitFor();
+  await older.getByLabel('Railway alignment').selectOption('north');
+
+  const newer = await older.context().newPage();
+  await newer.goto(older.url());
+  await newer.getByLabel('Crossing type').selectOption('tunnel');
+  await newer.getByRole('button', { name: 'Test crossing' }).click();
+  await newer.getByRole('list', { name: 'Map key' }).getByText('Tunnel entrances').waitFor();
+  await newer.getByLabel('Railway alignment').selectOption('south');
+  await newer.getByRole('button', { name: 'Without proposed works' }).click();
+
+  await older.getByRole('button', { name: 'Share comparison' }).click();
+  await older.getByRole('status').getByText('Comparison shared with your teacher.').waitFor();
+  await projectSiteAComparison(projector);
+  await projector.getByText('Central crossing · Elevated railway · Valley approach', { exact: true }).waitFor();
+  const proposed = projector.getByRole('region', { name: 'With proposed works' });
+  assert.equal(await proposed.locator('.map-supports:visible').count(), 5);
+  await newer.reload();
+  assert.equal(await newer.getByLabel('Railway alignment').inputValue(), 'south');
+  assert.equal(await newer.getByLabel('Crossing type').inputValue(), 'tunnel');
+});
+
+test('signing out clears the open comparison and gallery before the projector is reused', { timeout: 30000 }, async (t) => {
+  const { teacher, projector, groupAt, origin, issueCredential } = await startInvestigation(t);
+  const group = await groupAt('A');
+  await group.getByRole('button', { name: 'Share comparison' }).click();
+  const galleryUrl = await projectSiteAComparison(projector);
+  const gallery = await teacher.context().newPage();
+  await gallery.goto(galleryUrl);
+  const listed = gallery.getByRole('link', { name: /Site A: Central wetland/ });
+  const projected = projector.getByRole('heading', { name: 'Site A: Central wetland' });
+  await listed.waitFor();
+  await projected.waitFor();
+
+  await teacher.getByRole('button', { name: 'Sign out' }).click();
+  await Promise.all([listed, projected].map(content => content.waitFor({ state: 'hidden', timeout: 8000 })));
+  await group.reload();
+  await group.getByRole('button', { name: 'Share comparison' }).waitFor();
+  await openClass(teacher, origin, issueCredential());
+  assert.equal(await gallery.getByText('Site A: Central wetland', { exact: true }).count(), 0);
+  assert.equal(await projector.getByRole('group', { name: 'Spring site map' }).count(), 0);
+});
+
+test('reopening the gallery and selected comparison of a closed Traditional Chinese class shows Chinese', { timeout: 30000 }, async (t) => {
+  const { teacher, projector, groupAt } = await startInvestigation(t, '繁體中文');
+  const group = await groupAt('A');
+  await group.getByRole('button', { name: '分享比較結果' }).click();
+  const galleryUrl = await projectSiteAComparison(projector);
+  const comparisonUrl = projector.url();
+  await teacher.getByRole('button', { name: '結束課堂' }).click();
+
+  const returning = await teacher.context().newPage();
+  for (const url of [galleryUrl, comparisonUrl]) {
+    const response = await returning.goto(url);
+    assert.equal(response.status(), 410);
+    assert.equal(await returning.locator('html').getAttribute('lang'), 'zh-Hant');
+    await returning.getByRole('heading', { name: '這個課堂已結束' }).waitFor();
+  }
+});
+
 test('Pass the City applies each saved crossing at the partner site', { timeout: 30000 }, async (t) => {
   const { groupAt, joinUrl, teacher } = await startInvestigation(t);
   const groupA = await groupAt('A');
@@ -597,4 +778,89 @@ test('a language switch during the swap keeps the saved crossing and both partne
     groupA.getByRole('heading', { name: '這個課堂已結束' }).waitFor(),
     groupB.getByRole('heading', { name: 'This class is closed' }).waitFor(),
   ]);
+});
+
+test('Pass the City keeps the original Site A comparison on the projector while the group shares Site B', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher, projector } = await startInvestigation(t);
+  const group = await groupAt('A');
+  const partner = await groupAt('B');
+  await group.getByLabel('Crossing type').selectOption('tunnel');
+  await group.getByLabel('Construction access route', { exact: true }).selectOption('valley');
+  await group.getByRole('button', { name: 'Save for swap' }).click();
+  const evidence = 'Construction access route overlaps modelled nesting habitat.';
+  await group.getByText('Possible disturbance', { exact: true }).click();
+  await group.getByText(evidence, { exact: true }).waitFor();
+  const originalAccess = await rectangleGeometry(group.locator('.site-map .map-access'));
+  const originalHabitat = await rectangleGeometry(group.locator('.site-map .map-habitat'));
+  assert.equal(originalAccess.length, 3);
+  assert.equal(originalHabitat.length, 1);
+  await group.getByRole('button', { name: 'Share comparison' }).click();
+  await projectSiteAComparison(projector);
+  const originalUrl = projector.url();
+  const proposed = projector.getByRole('region', { name: 'With proposed works' });
+  const baseline = projector.getByRole('region', { name: 'Without proposed works' });
+  await proposed.getByText(evidence, { exact: true }).waitFor();
+
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  await partner.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  await group.getByText('No modelled overlap', { exact: true }).waitFor();
+  await group.getByLabel('Railway alignment').selectOption('south');
+  await group.getByLabel('Crossing type').selectOption('elevated');
+  await group.getByLabel('Construction access route', { exact: true }).selectOption('east');
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+  assert.notDeepEqual(await rectangleGeometry(group.locator('.site-map .map-access')), originalAccess);
+  const partnerHabitat = await rectangleGeometry(group.locator('.site-map .map-habitat'));
+  assert.notDeepEqual(partnerHabitat, originalHabitat);
+  await group.getByRole('button', { name: 'Share comparison' }).click();
+  await group.getByRole('status').getByText('Comparison shared with your teacher.').waitFor();
+  assert.equal(projector.url(), originalUrl);
+  await proposed.getByText(evidence, { exact: true }).waitFor();
+
+  await projector.getByRole('link', { name: 'Back to shared comparisons' }).click();
+  await projector.getByRole('link', { name: /Site B: Riverside wetland/ }).click();
+  await projector.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  await proposed.getByText('No modelled overlap', { exact: true }).waitFor();
+  assert.deepEqual(await rectangleGeometry(proposed.locator('.map-habitat')), partnerHabitat);
+  await projector.getByRole('link', { name: 'Back to shared comparisons' }).click();
+  await projector.getByRole('link', { name: /Site A: Central wetland/ }).click();
+  assert.equal(projector.url(), originalUrl);
+  await projector.getByText('Central crossing · Tunnel · Valley approach', { exact: true }).waitFor();
+  await proposed.getByText(evidence, { exact: true }).waitFor();
+  assert.deepEqual(await rectangleGeometry(proposed.locator('.map-access')), originalAccess);
+  assert.deepEqual(await rectangleGeometry(proposed.locator('.map-habitat')), originalHabitat);
+  assert.deepEqual(await rectangleGeometry(baseline.locator('.map-habitat')), originalHabitat);
+  assert.equal(await baseline.locator('.map-railway').count(), 0);
+});
+
+test('a pre-swap tab can share Site A without restoring its outdated draft at Site B', { timeout: 30000 }, async (t) => {
+  const { groupAt, teacher, projector } = await startInvestigation(t);
+  const group = await groupAt('A');
+  await groupAt('B');
+  await group.getByRole('button', { name: 'Save for swap' }).click();
+  await group.getByLabel('Crossing type').selectOption('tunnel');
+  await group.getByLabel('Construction access route', { exact: true }).selectOption('valley');
+  await group.getByRole('button', { name: 'Test crossing' }).click();
+
+  const stale = await group.context().newPage();
+  await stale.route('**/classes/*/status', route => route.abort());
+  await stale.goto(group.url());
+  await stale.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  await stale.getByLabel('Railway alignment').selectOption('north');
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
+  await group.getByLabel('Railway alignment').selectOption('south');
+  await group.getByRole('button', { name: 'Without proposed works' }).click();
+
+  await stale.getByRole('button', { name: 'Share comparison' }).click();
+  await projectSiteAComparison(projector);
+  await projector.getByText('Central crossing · Tunnel · Valley approach', { exact: true }).waitFor();
+  await projector.getByRole('region', { name: 'With proposed works' })
+    .getByText('Construction access route overlaps modelled nesting habitat.', { exact: true }).waitFor();
+  await group.reload();
+  await group.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  assert.equal(await group.getByLabel('Railway alignment').inputValue(), 'south');
+  assert.equal(await group.getByLabel('Crossing type').inputValue(), 'elevated');
+  assert.equal(await group.getByRole('button', { name: 'Without proposed works' }).getAttribute('aria-pressed'), 'true');
 });

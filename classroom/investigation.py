@@ -18,6 +18,14 @@ class Design:
 
 
 @dataclass(frozen=True)
+class Comparison:
+    """Inputs that reproduce both views and their evidence for a tested crossing."""
+
+    site: str
+    design: Design
+
+
+@dataclass(frozen=True)
 class Footprint:
     x: int
     y: int
