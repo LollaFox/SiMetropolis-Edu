@@ -1,4 +1,4 @@
-"""The student-facing controls and schematic for the spring investigation."""
+"""Controls and map views for the spring investigation."""
 
 from .investigation import (
     ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, MAP_BOTTOM, STATIONS, WETLAND_TOP,
@@ -34,6 +34,8 @@ COPY = {
     "replay": ("Replay crossing", "重播走線測試"),
     "replayed": ("Crossing replayed.", "已重播走線測試。"),
     "reset": ("Reset crossing", "重設走線"),
+    "share": ("Share comparison", "分享比較結果"),
+    "shared": ("Comparison shared with your teacher.", "已與老師分享比較結果。"),
     "station_west": ("West station", "西面車站"),
     "station_east": ("East station", "東面車站"),
     "wetland": ("Wetland", "濕地"),
@@ -79,6 +81,7 @@ def spring_investigation(session, group, notice):
     return f"""<section class="investigation" id="spring-investigation" aria-labelledby="spring-title">
   <h3 id="spring-title">{t["spring"]}</h3>
   <form class="crossing-controls" id="crossing-design" action="/join/{session.code}/view?lang={group.language}" method="post">
+    <input type="hidden" name="revision" value="{group.revision}">
     <input type="hidden" name="site" value="{group.site}">
     {select_control("alignment", ALIGNMENTS, draft.alignment, t)}
     {select_control("crossing_type", CROSSING_TYPES, draft.crossing_type, t)}
@@ -90,35 +93,63 @@ def spring_investigation(session, group, notice):
     </div>
   </form>
   <div>
-    {spring_comparison(group, t, notice)}
+    {spring_comparison(session, group, t, notice)}
     {model_rule(group.language, t)}
   </div>
 </section>"""
 
 
-def spring_comparison(group, t, notice):
-    design = group.tested_design if group.show_works else None
+def spring_comparison(session, group, t, notice):
+    status = ""
+    if notice in {"replayed", "saved", "shared"}:
+        status = f'<p class="experiment-status" role="status">{t[notice]}</p>'
+    comparison_key, comparison = group.capture_comparison()
+    return f"""<div id="spring-comparison">
+  <div class="compare-controls" role="group" aria-label="{t["comparison"]}">
+    {view_button("proposed", group.show_works, t)}
+    {view_button("baseline", not group.show_works, t)}
+    <button class="secondary replay" form="crossing-design" name="view" value="replay">{t["replay"]}</button>
+    <button class="secondary" form="crossing-design" name="comparison" value="{comparison_key}"
+      formaction="/join/{session.code}/share?lang={group.language}">{t["share"]}</button>
+  </div>
+  {status}
+  {spring_result(comparison, group.show_works, t, "spring")}
+</div>"""
+
+
+def design_summary(design, language):
+    t = words(language, COPY)
+    return " · ".join(t[key] for key in (design.alignment, design.crossing_type, design.access_route))
+
+
+def projected_maps(comparison, language):
+    t = words(language, COPY)
+    return f"""<div class="comparison-maps">
+  <section aria-labelledby="baseline-heading">
+    <h2 id="baseline-heading">{t["baseline"]}</h2>
+    {spring_result(comparison, False, t, "baseline")}
+  </section>
+  <section aria-labelledby="proposed-heading">
+    <h2 id="proposed-heading">{t["proposed"]}</h2>
+    {spring_result(comparison, True, t, "proposed", expanded=True)}
+  </section>
+</div>"""
+
+
+def spring_result(comparison, show_works, t, prefix, *, expanded=False):
+    design = comparison.design if show_works else None
     crossing = crossing_geometry(design) if design else None
     works = crossing.works if crossing else {}
-    habitat = nesting_habitat(group.site)
+    habitat = nesting_habitat(comparison.site)
     overlaps = overlapping_works(works, habitat)
     keys = ["habitat"]
     if design:
         keys.extend([design.crossing_type, *works])
     if overlaps:
         keys.append("overlap")
-    status = f'<p class="experiment-status" role="status">{t[notice]}</p>' if notice in {"replayed", "saved"} else ""
-    return f"""<div id="spring-comparison">
-  <div class="compare-controls" role="group" aria-label="{t["comparison"]}">
-    {view_button("proposed", group.show_works, t)}
-    {view_button("baseline", not group.show_works, t)}
-    <button class="secondary replay" form="crossing-design" name="view" value="replay">{t["replay"]}</button>
-  </div>
-  {status}
-  {spring_map(group.site, crossing, habitat, overlaps, t)}
+    return f"""{spring_map(comparison.site, crossing, habitat, overlaps, t, prefix)}
   <ul class="map-key" aria-label="{t["map_key"]}">{map_key(keys, t)}</ul>
-  {finding_panel(group.show_works, overlaps, t)}
-</div>"""
+  {finding_panel(show_works, overlaps, t, expanded=expanded)}"""
 
 
 def view_button(view, active, t):
@@ -130,7 +161,7 @@ def map_key(keys, t):
     return "".join(f'<li><span class="key-mark {key}"></span>{t[key]}</li>' for key in keys)
 
 
-def finding_panel(show_works, overlaps, t):
+def finding_panel(show_works, overlaps, t, *, expanded=False):
     if not show_works:
         return f'<div class="finding clear"><strong>{t["baseline_title"]}</strong><p>{t["baseline_help"]}</p></div>'
     if not overlaps:
@@ -138,9 +169,11 @@ def finding_panel(show_works, overlaps, t):
     evidence = "".join(
         f'<li id="evidence-{work}" tabindex="-1">{t[work + "_evidence"]}</li>' for work in overlaps
     )
-    return f"""<p class="map-help">{t["select_overlap"]}</p>
-<details class="finding disturbance">
-  <summary><strong>{t["finding"]}</strong><span>{t["inspect"]}</span></summary>
+    help_text = "" if expanded else f'<p class="map-help">{t["select_overlap"]}</p>'
+    inspect_label = "" if expanded else f'<span>{t["inspect"]}</span>'
+    return f"""{help_text}
+<details class="finding disturbance"{" open" if expanded else ""}>
+  <summary><strong>{t["finding"]}</strong>{inspect_label}</summary>
   <ul>{evidence}</ul>
 </details>"""
 
@@ -165,7 +198,7 @@ def footprint_rect(footprint, style):
             f'width="{footprint.width}" height="{footprint.height}"/>')
 
 
-def overlap_links(overlaps, t):
+def overlap_links(overlaps, t, prefix):
     hit_areas = []
     highlights = []
     for work, boxes in overlaps.items():
@@ -174,13 +207,13 @@ def overlap_links(overlaps, t):
         for box in boxes:
             hit_areas.append(f'<a href="{href}" tabindex="-1" aria-hidden="true">'
                              f'{footprint_rect(box, "map-overlap-hit")}</a>')
-            highlights.append(f'<a href="{href}" aria-label="{label}">'
+            highlights.append(f'<a href="{href}" aria-label="{label}" fill="url(#{prefix}-overlap)">'
                               f'{footprint_rect(box, "map-overlap")}</a>')
     # Draw all visible links above the touch padding of neighbouring highlights.
     return "".join(hit_areas + highlights)
 
 
-def spring_map(site, crossing, habitat, overlaps, t):
+def spring_map(site, crossing, habitat, overlaps, t, prefix):
     wetland_top = WETLAND_TOP[site]
     railway = ""
     footprints = ""
@@ -194,10 +227,10 @@ def spring_map(site, crossing, habitat, overlaps, t):
         f'<text x="{x}" y="{y + 31}" text-anchor="middle">{t[key]}</text>'
         for (x, y), key in zip(STATIONS, ("station_west", "station_east"))
     )
-    return f"""<svg class="site-map" viewBox="0 0 720 {MAP_BOTTOM}" role="group" aria-label="{t["map"]}" aria-describedby="spring-map-features">
-  <desc id="spring-map-features">{t["river"]} · {t["wetland"]} · {t["station_west"]} · {t["station_east"]}</desc>
+    return f"""<svg class="site-map" viewBox="0 0 720 {MAP_BOTTOM}" role="group" aria-label="{t["map"]}" aria-describedby="{prefix}-map-features">
+  <desc id="{prefix}-map-features">{t["river"]} · {t["wetland"]} · {t["station_west"]} · {t["station_east"]}</desc>
   <defs>
-    <pattern id="footprint-overlap" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
+    <pattern id="{prefix}-overlap" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)">
       <rect width="5" height="5" fill="#ffdea1"/>
       <path d="M0 0V5" stroke="#9a3c20" stroke-width="3"/>
     </pattern>
@@ -211,7 +244,7 @@ def spring_map(site, crossing, habitat, overlaps, t):
   {footprint_rect(habitat, "map-habitat")}
   {railway}
   {footprints}
-  {overlap_links(overlaps, t)}
+  {overlap_links(overlaps, t, prefix)}
   <text x="407" y="{wetland_top + 97}" text-anchor="middle">{t["wetland"]}</text>
   {stations}
 </svg>"""

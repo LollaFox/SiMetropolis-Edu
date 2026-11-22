@@ -142,17 +142,32 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(204, headers=(("X-Sites-Swapped", str(session.swapped).lower()),))
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
-            if detail in {"", "qr.png"}:
-                session = self.owned_class(code, language)
-                if isinstance(session, Response):
-                    return session
-                join_url = self.server.origin + student_join_path(session)
-                if detail == "qr.png":
-                    image = BytesIO()
-                    qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
-                    return Response(200, image.getvalue(), content_type="image/png")
-                return Response(200, views.projection(session, join_url))
+            return self.teacher_projection(code, detail, language)
         return Response(404, views.unavailable(language))
+
+    def teacher_projection(self, code, detail, language):
+        session = self.owned_class(code, language)
+        if isinstance(session, Response):
+            return session
+
+        if detail == "status":
+            return Response(204)
+        if detail == "comparisons":
+            return Response(200, views.shared_comparisons(session))
+        if detail == "comparisons/feed":
+            return Response(200, views.comparison_choices(session))
+        if detail.startswith("comparisons/"):
+            comparison = session.comparisons.get(detail.removeprefix("comparisons/"))
+            if comparison is not None:
+                return Response(200, views.comparison_projection(session, comparison))
+        if detail in {"", "qr.png"}:
+            join_url = self.server.origin + student_join_path(session)
+            if detail == "qr.png":
+                image = BytesIO()
+                qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
+                return Response(200, image.getvalue(), content_type="image/png")
+            return Response(200, views.projection(session, join_url))
+        return Response(404, views.unavailable(session.language))
 
     def do_POST(self):
         path, language, _ = self.request_target()
@@ -220,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.redirect(f"{join_path}&taken=1")
             cookie = self.session_cookie("group_session", token, f"/join/{code}")
             return self.redirect(join_path, cookie)
-        if group is None or action not in {"language", "design", "view"}:
+        if group is None or action not in {"language", "design", "view", "share"}:
             return Response(404)
         current_site = fields.get("site", [""])[0] == group.site
         draft = group.draft_design
@@ -242,6 +257,16 @@ class Handler(BaseHTTPRequestHandler):
             group.language = preferred
             anchor = ""
 
+        if action == "share":
+            comparison = group.rendered_comparisons.get(fields.get("comparison", [""])[0])
+            if comparison is None:
+                return Response(400)
+            session.share_comparison(comparison)
+            notice = "&notice=shared"
+            # A stale tab can send its captured maps without resetting newer controls.
+            if not current_site or fields.get("revision", [""])[0] != str(group.revision):
+                return self.redirect(f"{join_path}{notice}{anchor}")
+
         # A language preference travels with the group. Design and view actions belong to the site.
         if not current_site:
             return self.redirect(f"{join_path}&notice=swapped#current-site")
@@ -262,6 +287,7 @@ class Handler(BaseHTTPRequestHandler):
             elif view == "replay":
                 notice = "&notice=replayed"
         group.draft_design = draft
+        group.revision += 1
         return self.redirect(f"{join_path}{notice}{anchor}")
 
 
