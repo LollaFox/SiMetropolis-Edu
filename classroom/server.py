@@ -7,6 +7,7 @@ from io import BytesIO
 from ipaddress import IPv4Address
 from pathlib import Path
 import secrets
+from subprocess import SubprocessError
 from threading import Thread
 from time import monotonic
 from typing import Union
@@ -18,7 +19,7 @@ from qrcode.image.pure import PyPNGImage
 
 from . import views
 from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
-from .network import ClassroomLan, format_origin
+from .network import ClassroomLan, format_origin, has_network_settings, open_network_settings
 from .state import Classroom, ClassSession
 
 
@@ -109,10 +110,10 @@ class Handler(BaseHTTPRequestHandler):
     def teacher_id(self):
         return self.classroom.teacher_for_session(self.cookie_value(self.server.teacher_cookie_name))
 
-    def join_origin_for_page(self, path):
+    def join_origin_for_page(self, path, fields):
         if self.server.lan is None:
             return self.server.origin
-        if path != "/teacher" and not path.startswith("/teacher/project/"):
+        if not path.startswith("/teacher/project/"):
             return None
         with self.classroom.lock:
             teacher = self.teacher_id()
@@ -120,11 +121,12 @@ class Handler(BaseHTTPRequestHandler):
             if session is None:
                 return None
             projection = f"/teacher/project/{session.code}"
-            if path not in ("/teacher", projection, projection + "/", projection + "/qr.png"):
+            join_status = path == projection + "/status" and fields.get("network") == ["1"]
+            if not join_status and path not in (projection, projection + "/", projection + "/qr.png"):
                 return None
         # Windows adapter discovery can take seconds. Groups can still act and
         # classes can expire while the teacher waits. get_page rechecks ownership.
-        return self.server.lan.join_origin(refresh=path == "/teacher")
+        return self.server.lan.join_origin()
 
     def local_request_origin(self):
         # Match the numeric address the browser reached, including on a multi-interface host.
@@ -135,9 +137,13 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def is_local_teacher_launch(self):
-        return (self.server.teacher_launch is not None
-                and IPv4Address(self.client_address[0]).is_loopback
-                and self.local_request_origin() == self.server.origin)
+        return self.server.teacher_launch is not None and self.is_local_request()
+
+    def is_local_request(self):
+        return IPv4Address(self.client_address[0]).is_loopback and self.local_request_origin() == self.server.origin
+
+    def can_open_network_settings(self):
+        return self.server.lan is not None and self.is_local_request() and has_network_settings()
 
     def owned_class(self, code, language) -> Union[ClassSession, Response]:
         teacher = self.teacher_id()
@@ -192,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 # A group can leave the page while the request is waiting for a swap.
                 return
-        join_origin = self.join_origin_for_page(path)
+        join_origin = self.join_origin_for_page(path, fields)
         with self.classroom.lock:
             response = self.get_page(path, language, fields, join_origin)
         self.respond(response)
@@ -229,7 +235,8 @@ class Handler(BaseHTTPRequestHandler):
             if session is None:
                 return Response(200, views.teacher(language))
             return Response(200, views.teacher(
-                session.language, session, notice=notice, can_project=join_origin is not None,
+                session.language, session, notice=notice, track_network=self.server.lan is not None,
+                local_settings=self.can_open_network_settings(),
             ))
         if path == "/join":
             if "code" not in fields:
@@ -266,16 +273,19 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(204, headers=(("X-Sites-Swapped", str(session.swapped).lower()),))
         if path.startswith("/teacher/project/"):
             code, _, detail = path.removeprefix("/teacher/project/").partition("/")
-            return self.teacher_projection(code, detail, language, join_origin)
+            return self.teacher_projection(code, detail, language, join_origin, fields)
         return Response(404, views.unavailable(language))
 
-    def teacher_projection(self, code, detail, language, join_origin):
+    def teacher_projection(self, code, detail, language, join_origin, fields):
         session = self.owned_class(code, language)
         if isinstance(session, Response):
             return session
 
         if detail == "status":
-            return Response(204)
+            headers = ()
+            if join_origin and fields.get("network") == ["1"]:
+                headers = (("X-Join-Url", join_origin + student_join_path(session)),)
+            return Response(204, headers=headers)
         if detail == "comparisons":
             return Response(200, views.shared_comparisons(session))
         if detail == "comparisons/feed":
@@ -284,15 +294,15 @@ class Handler(BaseHTTPRequestHandler):
             comparison = session.comparisons.get(detail.removeprefix("comparisons/"))
             if comparison is not None:
                 return Response(200, views.comparison_projection(session, comparison))
-        if detail in {"", "qr.png"}:
-            if join_origin is None:
+        join_url = join_origin + student_join_path(session) if join_origin else None
+        if detail == "qr.png":
+            if join_url is None or fields.get("join", [join_url]) != [join_url]:
                 return Response(503)
-            join_url = join_origin + student_join_path(session)
-            if detail == "qr.png":
-                image = BytesIO()
-                qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
-                return Response(200, image.getvalue(), content_type="image/png")
-            return Response(200, views.projection(session, join_url))
+            image = BytesIO()
+            qrcode.make(join_url, image_factory=PyPNGImage, box_size=8).save(image)
+            return Response(200, image.getvalue(), content_type="image/png")
+        if detail == "":
+            return Response(200, views.projection(session, join_url, track_network=self.server.lan is not None))
         return Response(404, views.unavailable(session.language))
 
     def do_POST(self):
@@ -304,9 +314,24 @@ class Handler(BaseHTTPRequestHandler):
         if not size.isascii() or not size.isdecimal() or len(size) > 4:
             return self.respond(Response(400))
         fields = parse_qs(self.rfile.read(int(size)).decode("utf-8", errors="replace"))
+        if path == "/teacher/network-settings":
+            return self.respond(self.teacher_network_settings(fields, language))
         with self.classroom.lock:
             response = self.post_page(path, language, fields)
         self.respond(response)
+
+    def teacher_network_settings(self, fields, language):
+        if not self.can_open_network_settings():
+            return Response(403)
+        with self.classroom.lock:
+            session = self.owned_class(fields.get("code", [""])[0], language)
+            if isinstance(session, Response):
+                return session
+        try:
+            open_network_settings()
+        except (OSError, SubprocessError):
+            return Response(503)
+        return Response(204)
 
     def post_page(self, path, language, fields):
         if path == "/teacher/launch" and self.is_local_teacher_launch():

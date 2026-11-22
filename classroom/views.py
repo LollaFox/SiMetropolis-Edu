@@ -5,7 +5,7 @@ from hashlib import sha256
 from html import escape
 from math import ceil
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .investigation_views import design_summary, projected_maps, spring_investigation
 from .localization import words
@@ -36,6 +36,11 @@ COPY = {
     "time_remaining": ("Time remaining", "剩餘時間"),
     "project": ("Project join information", "投影加入資訊"),
     "project_help": ("Open the join information in this browser and show that tab on the projector.", "請在此瀏覽器開啟加入資訊，並將該分頁投影給小組。"),
+    "network_problem": ("The classroom network is unavailable. Edu is retrying automatically.",
+                        "無法連接課堂網絡。Edu 正在自動重試。"),
+    "network_settings": ("Open network settings", "開啟網絡設定"),
+    "network_settings_error": ("Edu couldn’t open network settings. Open them from your computer’s settings menu.",
+                               "Edu 無法開啟網絡設定。請從電腦的設定選單開啟。"),
     "shared_comparisons": ("Shared comparisons", "已分享的比較結果"),
     "select_comparison": ("Choose a comparison to show on the projector.", "選擇要投影的比較結果。"),
     "no_comparisons": ("No group has shared a comparison yet.", "暫時沒有小組分享比較結果。"),
@@ -76,12 +81,14 @@ COPY = {
 }
 
 
-def page(language, title, content, *, layout="", session=None, teacher_only=False, joined=False):
+def page(language, title, content, *, layout="", session=None, teacher_only=False, joined=False,
+         track_network=False):
     name = words(language, COPY)["name"]
     status_base = "/teacher/project" if teacher_only else "/classes"
     if joined:
         status_base = "/join"
-    status = f' data-class-status="{status_base}/{session.code}/status"' if session else ""
+    network_query = "?network=1" if track_network else ""
+    status = f' data-class-status="{status_base}/{session.code}/status{network_query}"' if session else ""
     script = '<script src="/class-status.js" defer></script>' if session and not joined else ""
     bootstrap = f"<script>{GROUP_STATUS_SCRIPT}</script>" if joined else ""
     return f"""<!doctype html>
@@ -155,7 +162,15 @@ def teacher_launch(language):
 </section>""")
 
 
-def teacher(language, session=None, *, notice="", can_project=False):
+def network_notice(t, *, hidden=True, action=""):
+    return f"""
+  <div data-network-notice{' hidden' if hidden else ''}>
+    <p class="alert" role="status">{t["network_problem"]}</p>
+    {action}
+  </div>"""
+
+
+def teacher(language, session=None, *, notice="", track_network=False, local_settings=False):
     t = words(language, COPY)
     sign_out = f"""<form class="inline" action="/teacher/sign-out?lang={language}" method="post">
   <button class="secondary">{t["sign_out"]}</button>
@@ -163,18 +178,23 @@ def teacher(language, session=None, *, notice="", can_project=False):
     if session:
         remaining_ms = ceil(session.remaining_seconds() * 1000)
         minutes, seconds = divmod(ceil(remaining_ms / 1000), 60)
-        project_help = f'<p>{t["project_help"]}</p>' if can_project else ""
-        project_link = f"""<a class="button" href="/teacher/project/{session.code}"
-      target="_blank" rel="noopener">{t["project"]}</a>""" if can_project else ""
+        checking = " hidden" if track_network else ""
+        settings = f"""<form class="inline" action="/teacher/network-settings" method="post" data-network-settings>
+      <input type="hidden" name="code" value="{session.code}">
+      <button class="secondary">{t["network_settings"]}</button>
+    </form>
+    <p class="alert" role="alert" data-network-settings-error hidden>{t["network_settings_error"]}</p>""" if local_settings else ""
         return page(language, t["open"], f"""
 <section class="panel">
   <h1>{t["open"]}</h1>
   <p><span id="class-time-label">{t["time_remaining"]}</span>
     <span role="timer" aria-labelledby="class-time-label" data-remaining-ms="{remaining_ms}">{minutes:02d}:{seconds:02d}</span>
   </p>
-  {project_help}
+  {network_notice(t, action=settings) if track_network else ""}
+  <p data-network-ready{checking}>{t["project_help"]}</p>
   <div class="teacher-actions">
-    {project_link}
+    <span data-network-ready{checking}><a class="button" href="/teacher/project/{session.code}"
+      target="_blank" rel="noopener">{t["project"]}</a></span>
     <a class="button secondary" href="{comparison_url(session)}" target="_blank" rel="noopener">{t["shared_comparisons"]}</a>
   </div>
   {pass_the_city_controls(session, t, notice)}
@@ -184,7 +204,7 @@ def teacher(language, session=None, *, notice="", can_project=False):
     </form>
     {sign_out}
   </div>
-</section>""", session=session, teacher_only=True)
+</section>""", session=session, teacher_only=True, track_network=track_network)
     options = "".join(
         f'<option value="{value}" lang="{value}"{" selected" if value == language else ""}>{label}</option>'
         for value, label in LANGUAGES.items()
@@ -213,23 +233,33 @@ def pass_the_city_controls(session, t, notice):
 </form>"""
 
 
-def projection(session, url):
+def projection(session, url, *, track_network=False):
     language = session.language
     t = words(language, COPY)
-    code_entry = escape(url.rsplit("/", 1)[0], quote=True)
+    qr_path = f"/teacher/project/{session.code}/qr.png"
+    code_entry = escape(url.rsplit("/", 1)[0], quote=True) if url else ""
+    join_link = f' href="{escape(url, quote=True)}"' if url else ""
+    code_link = f' href="{code_entry}?lang={language}"' if url else ""
+    qr_src = qr_path + ("?" + urlencode({"join": url}) if track_network and url else "")
+    source = f' src="{escape(qr_src, quote=True)}"' if url else ""
     return page(language, t["join_title"], f"""
-<section class="panel projection">
-  <div>
-    <h1>{t["join_title"]}</h1>
-    <p>{t["join_help"]}</p>
-    <p class="code-label">{t["code"]}</p>
-    <code>{session.code}</code>
-    <p><a class="join-url" href="{escape(url, quote=True)}">{escape(url)}</a></p>
-    <p>{t["enter_code"]} <a class="join-url" href="{code_entry}?lang={language}">{code_entry}</a></p>
-    <p><a href="{comparison_url(session)}">{t["shared_comparisons"]}</a></p>
+<section class="panel">
+  {network_notice(t, hidden=url is not None) if track_network else ""}
+  <div data-network-ready{' hidden' if url is None else ''}>
+    <div class="projection">
+      <div>
+        <h1>{t["join_title"]}</h1>
+        <p>{t["join_help"]}</p>
+        <p class="code-label">{t["code"]}</p>
+        <code>{session.code}</code>
+        <p><a class="join-url" data-join-link{join_link}>{escape(url or '')}</a></p>
+        <p>{t["enter_code"]} <a class="join-url" data-code-link{code_link}>{code_entry}</a></p>
+        <p><a href="{comparison_url(session)}">{t["shared_comparisons"]}</a></p>
+      </div>
+      <img class="join-qr" data-join-qr="{qr_path}"{source} alt="{t["qr"]}">
+    </div>
   </div>
-  <img class="join-qr" src="/teacher/project/{session.code}/qr.png" alt="{t["qr"]}">
-</section>""", layout="wide", session=session, teacher_only=True)
+</section>""", layout="wide", session=session, teacher_only=True, track_network=track_network)
 
 
 def comparison_url(session, entry=""):

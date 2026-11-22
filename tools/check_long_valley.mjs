@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
 import { networkInterfaces, tmpdir } from 'node:os';
@@ -89,8 +89,10 @@ async function prepareShortcut(temporary, env) {
   return script;
 }
 
-async function launchClassroom(t, { shortcut = false, windowsScript, browser, delayedProfile = false,
-  env = {}, retryDownload = false } = {}) {
+async function launchClassroom(t, {
+  shortcut = false, windowsScript, browser, delayedProfile = false, env = {}, retryDownload = false,
+  networkAddress, settingsPlatform = '', durationSeconds = 2700,
+} = {}) {
   const temporary = await mkdtemp(join(tmpdir(), 'long-valley-launch-'));
   let launcher;
   let closed;
@@ -129,6 +131,9 @@ try {
   };
   let command = python;
   let args = ['-B', '-m', 'classroom', 'launch'];
+  const networkFile = join(temporary, 'network-address');
+  const settingsFile = join(temporary, 'opened-settings');
+  const setNetworkAddress = address => writeFile(networkFile, address);
   if (windowsScript || shortcut) {
     options.env.PYTHONPATH = '';
     options.cwd = temporary;
@@ -141,6 +146,46 @@ try {
       command = script;
       args = [];
     }
+  } else if (networkAddress !== undefined) {
+    await setNetworkAddress(networkAddress);
+    args = ['-B', '-c', `
+from contextlib import ExitStack
+from pathlib import Path
+import subprocess
+import sys
+from time import monotonic, sleep
+from types import SimpleNamespace
+from unittest.mock import patch
+from classroom.__main__ import main
+
+network_address, opened_settings, settings_platform, duration_seconds = sys.argv[1:5]
+del sys.argv[1:5]
+
+def discover(port):
+    # A held OS query tests whether the teacher page waits for adapter discovery.
+    deadline = monotonic() + 8
+    while (address := Path(network_address).read_text().strip()) == 'checking' and monotonic() < deadline:
+        sleep(.05)
+    return f'http://{address}:{port}' if address and address != 'checking' else None
+
+def open_settings(target):
+    Path(opened_settings).write_text(target)
+
+def run_command(args, **kwargs):
+    assert args[0] == '/usr/bin/open'
+    open_settings(args[1])
+    return subprocess.CompletedProcess(args, 0)
+
+with ExitStack() as fixtures:
+    fixtures.enter_context(patch('classroom.network.local_join_origin', new=discover))
+    fixtures.enter_context(patch('classroom.__main__.DEFAULT_CLASS_DURATION_SECONDS', int(duration_seconds)))
+    if settings_platform:
+        fixtures.enter_context(patch('classroom.network.sys', new=SimpleNamespace(platform=settings_platform)))
+        fixtures.enter_context(patch('platform.mac_ver', return_value=('26.0', ('', '', ''), '')))
+        fixtures.enter_context(patch('os.startfile', new=open_settings, create=True))
+        fixtures.enter_context(patch('subprocess.run', new=run_command))
+    main()
+`, networkFile, settingsFile, settingsPlatform, String(durationSeconds), 'launch'];
   } else if (delayedProfile) {
     args = ['-B', '-c', `
 from unittest.mock import patch
@@ -163,7 +208,10 @@ with patch('classroom.server.monotonic', new=lambda: next(clock, 121)):
       openClassroomBrowser(t, launcher, closed, browser, retryDownload ? 180000 : 10000),
       retryDownload && retryWindowsDownload(launcher.pid, retry.signal),
     ]);
-    return { ...result, stop, progress };
+    return {
+      ...result, stop, progress, setNetworkAddress,
+      openedSettings: () => readFile(settingsFile, 'utf8'),
+    };
   } finally {
     retry.abort();
   }
@@ -239,7 +287,7 @@ async function startConnectedClass(teacher, launchUrl, language) {
   assert.ok(remaining <= 45 * 60000 && remaining >= 45 * 60000 - (performance.now() - started),
     'The default deadline should be 45 minutes from Start class');
   assert.equal(await teacher.getByRole('alert').count(), 0);
-  assert.equal(await teacher.getByText(/Open network settings|開啟網絡設定/).count(), 0);
+  assert.equal(await teacher.getByRole('button', { name: /Open network settings|開啟網絡設定/ }).count(), 0);
 }
 
 test('a connected English class projects a LAN link that a group can use', lanTest, async (t) => {
@@ -336,6 +384,125 @@ test('the prepared launcher opens lesson preparation with only a loopback connec
   assert.equal(await teacher.getByRole('link', { name: 'Project join information' }).count(), 0);
   await teacher.getByRole('button', { name: 'Start class' }).click();
   await teacher.getByRole('heading', { name: '課堂已開啟' }).waitFor();
+});
+
+test('the teacher can start a Traditional Chinese class while the network is unavailable', { timeout: 30000 }, async (t) => {
+  const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: 'checking' });
+  const teacher = await participant(browser);
+  await teacher.goto(launchUrl.href);
+  await teacher.getByLabel('Starting language').selectOption({ label: '繁體中文' });
+  await teacher.getByRole('button', { name: 'Start class' }).click();
+  const timer = teacher.getByRole('timer', { name: '剩餘時間' });
+  assert.match(await timer.textContent(), /^(45:00|44:59)$/);
+  assert.equal(await teacher.getByRole('button', { name: '開啟網絡設定' }).count(), 0);
+  await setNetworkAddress('');
+  await teacher.getByText('無法連接課堂網絡。Edu 正在自動重試。').waitFor();
+  if (hasNativeShortcut) await teacher.getByRole('button', { name: '開啟網絡設定' }).waitFor();
+  assert.equal(await teacher.getByRole('link', { name: '投影加入資訊' }).count(), 0);
+  await teacher.waitForFunction(() => /^44:5[0-8]$/.test(document.querySelector('[role="timer"]').textContent));
+  await setNetworkAddress('192.0.2.10');
+  await teacher.getByRole('link', { name: '投影加入資訊' }).waitFor({ timeout: 12000 });
+  assert.equal(await teacher.getByText('無法連接課堂網絡。Edu 正在自動重試。').isVisible(), false);
+});
+
+for (const [platform, target] of [
+  ['darwin', 'x-apple.systempreferences:com.apple.Network-Settings.extension'],
+  ['win32', 'ms-settings:network-status'],
+]) {
+  test(`the local teacher can open ${platform === 'darwin' ? 'Mac' : 'Windows'} network settings during an outage`,
+    { timeout: 30000 }, async (t) => {
+      const { browser, launchUrl, openedSettings } = await launchClassroom(t, {
+        networkAddress: '', settingsPlatform: platform,
+      });
+      const teacher = await participant(browser);
+      await teacher.goto(launchUrl.href);
+      await teacher.getByRole('button', { name: 'Start class' }).click();
+      const settings = teacher.getByRole('button', { name: 'Open network settings' });
+      const originalLoad = await teacher.evaluate(() => performance.timeOrigin);
+      const [response] = await Promise.all([
+        teacher.waitForResponse(result => result.request().method() === 'POST'),
+        settings.click(),
+      ]);
+      assert.equal(response.status(), 204);
+      assert.equal(await openedSettings(), target);
+      assert.equal(await teacher.evaluate(() => performance.timeOrigin), originalLoad);
+      await teacher.getByRole('timer').waitFor();
+
+      const group = await participant(browser);
+      const rejected = await group.request.post(response.url(), {
+        headers: { Origin: launchUrl.origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+        data: response.request().postData(),
+      });
+      assert.equal(rejected.status(), 403);
+    });
+}
+
+test('a running class withdraws stale join information and projects the new address after reconnecting', lanTest, async (t) => {
+  const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, { networkAddress: '192.0.2.10' });
+  const teacher = await participant(browser);
+  await startConnectedClass(teacher, launchUrl, 'English');
+  const projector = await openProjection(teacher);
+  const original = new URL(await readQr(projector));
+  const code = await projector.locator('code').innerText();
+  const projectLink = teacher.getByRole('link', { name: 'Project join information' });
+  const outage = teacher.getByText('The classroom network is unavailable. Edu is retrying automatically.');
+  assert.equal(original.hostname, '192.0.2.10');
+  assert.equal(await outage.isVisible(), false);
+  const started = performance.now();
+
+  await setNetworkAddress('');
+  await outage.waitFor({ timeout: 12000 });
+  await projectLink.waitFor({ state: 'hidden' });
+  await projector.getByRole('img', { name: 'Join QR code' }).waitFor({ state: 'hidden', timeout: 12000 });
+  assert.equal(await projector.getByRole('link', { name: original.href }).isVisible(), false);
+  assert.equal(await projector.locator('code').isVisible(), false);
+  const pages = [teacher, projector];
+  const originalLoads = await Promise.all(pages.map(page => page.evaluate(() => performance.timeOrigin)));
+
+  await setNetworkAddress(lanAddresses[0]);
+  await projectLink.waitFor({ timeout: 12000 });
+  await outage.waitFor({ state: 'hidden' });
+  const restoredLink = projector.getByRole('link', { name: new RegExp(`/join/${code}\\?lang=en$`) });
+  await restoredLink.waitFor({ timeout: 12000 });
+  const restored = new URL(await restoredLink.getAttribute('href'));
+  assert.equal(restored.hostname, lanAddresses[0]);
+  assert.equal(restored.pathname, original.pathname);
+  assert.equal(await readQr(projector), restored.href);
+  assert.deepEqual(await Promise.all(pages.map(page => page.evaluate(() => performance.timeOrigin))), originalLoads);
+  const [minutes, seconds] = (await teacher.getByRole('timer').textContent()).split(':').map(Number);
+  assert.ok((45 * 60 - minutes * 60 - seconds) * 1000 >= performance.now() - started - 1000,
+    'The original countdown should continue during the interruption');
+
+  const group = await participant(browser);
+  await group.goto(restored.href);
+  await group.getByRole('button', { name: 'Choose Site A' }).click();
+  await group.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+});
+
+test('a class that expires during an outage stays closed after the network returns', lanTest, async (t) => {
+  const lanAddress = lanAddresses[0];
+  const { browser, launchUrl, setNetworkAddress } = await launchClassroom(t, {
+    networkAddress: lanAddress, durationSeconds: 12,
+  });
+  const teacher = await participant(browser);
+  await teacher.goto(launchUrl.href);
+  await teacher.getByRole('button', { name: 'Start class' }).click();
+  const projector = await openProjection(teacher);
+  const joinUrl = await readQr(projector);
+
+  await setNetworkAddress('');
+  await teacher.getByText('The classroom network is unavailable. Edu is retrying automatically.')
+    .waitFor({ timeout: 10000 });
+  await Promise.all([
+    teacher.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor({ timeout: 12000 }),
+    projector.getByRole('heading', { name: 'This class is closed' }).waitFor({ timeout: 12000 }),
+  ]);
+
+  await setNetworkAddress(lanAddress);
+  const group = await participant(browser);
+  assert.equal((await group.goto(joinUrl)).status(), 410);
+  await group.getByRole('heading', { name: 'This class is closed' }).waitFor();
+  assert.equal(await teacher.getByRole('link', { name: 'Project join information' }).count(), 0);
 });
 
 test('Open SiMetropolis Edu runs from a prepared folder with spaces', {
