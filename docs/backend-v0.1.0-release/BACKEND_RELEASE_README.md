@@ -11,9 +11,9 @@ Working simulation backend with the original frontend bundled unchanged. Python 
 - Historical city data / 历史城市数据：[English](backend/docs/releases/CITY_HISTORY_EN.md) · [中文](backend/docs/releases/CITY_HISTORY_ZH.md)
 - [Detailed backend guide / 后端详细说明](backend/README.md)
 
-## Classroom downloads / 課堂下載
+## Open the classroom / 開啟課堂
 
-For the Long Valley classroom, follow the [English startup guide](../../README.md). 塱原課堂的下載和啟動步驟見[繁體中文說明](../../README_ZH.md)。
+For the Long Valley classroom, follow the [English startup guide](../../README.md). 塱原課堂的啟動步驟見[繁體中文說明](../../README_ZH.md)。
 
 ## Government examples and original handoff / 政府示例及原始交接
 

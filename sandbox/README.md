@@ -1,6 +1,6 @@
 # Northern Metropolis — sandbox 2.0
 
-Simulator source reference. For classroom downloads, see [SiMetropolis Edu](../README.md).
+Simulator source reference. For classroom startup instructions, see [SiMetropolis Edu](../README.md).
 
 A local 3D city game inspired by the Northern Metropolis. Housing, employment, construction, transport, energy and air quality change as the simulation runs. You can intervene, rewind, and branch to explore another future. The primary `sandbox/` directory contains v2. Original v1 remains under `sandbox_v1/`, and the relative `sandbox_v2 -> sandbox` symlink preserves older v2 commands.
 

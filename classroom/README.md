@@ -1,12 +1,6 @@
 # Long Valley classroom
 
-Choose your platform in the [project README](../README.md).
-
-On macOS 12 or later, extract `SiMetropolis-Edu-Mac.zip` and double-click **Open SiMetropolis Edu**. The first launch downloads about 24 MB. If the download stops, check your connection and select **Retry**. After setup, you can open lesson preparation while disconnected.
-
-On Windows, extract `SiMetropolis-Edu-Windows.zip` to a local folder and double-click **Open SiMetropolis Edu**. Keep the computer connected to the internet for first-use setup. The launcher shows download progress and offers **Retry** if a download is interrupted. After setup, you can open the same copy while disconnected.
-
-On a prepared Mac checkout, double-click **Open SiMetropolis Edu** (`.command`).
+Follow the [Mac Terminal or Windows shortcut instructions](../README.md) to open the classroom from the project folder.
 
 The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
@@ -117,9 +111,9 @@ Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` 
 
 ## Verify the teacher downloads
 
-The English and Traditional Chinese project READMEs use the latest GitHub release. Both assets belong on the same release, with the exact names `SiMetropolis-Edu-Mac.zip` and `SiMetropolis-Edu-Windows.zip`.
+The platform builds produce `SiMetropolis-Edu-Mac.zip` and `SiMetropolis-Edu-Windows.zip`.
 
-1. On a clean Mac and a clean Windows computer, follow the respective README link in a browser, extract the ZIP, and double-click **Open SiMetropolis Edu**. Check setup progress, interrupt the first download, and select **Retry** after reconnecting. When setup finishes, lesson preparation opens privately.
+1. On a clean Mac and a clean Windows computer, download the distribution ZIP for that platform when available, extract it, and double-click **Open SiMetropolis Edu**. Check setup progress, interrupt the first download, and select **Retry** after reconnecting. When setup finishes, lesson preparation opens privately.
 2. On a working classroom network, start an English class on one platform and a Traditional Chinese class on the other. Check that projection is available and the teacher sees no network notice. Use a separate device on that network to join by link in one class and by QR and short code in the other. From the group device, check that the teacher view and projection require teacher access.
 3. Run a separate recovery check on each platform. Start disconnected and verify the teacher sees the notice and the original countdown starts. Reconnect and join from the second device. Then disconnect from an already connected class, confirm the notice appears and joining is withheld, and reconnect. Check joining returns without refreshing and the original timer continues.
 4. From the student device, test a crossing. Close the teacher tab while leaving the launcher running, then double-click the extracted app or shortcut again. Compare the code and countdown and replay the tested crossing on the student device.

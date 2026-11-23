@@ -1,6 +1,6 @@
 # Northern Metropolis · Integrated Policy Sandbox
 
-**H3-round-2-right-ui-2026-10-17** · historical integration snapshot. For classroom downloads, see [SiMetropolis Edu](../README.md).
+**H3-round-2-right-ui-2026-10-17** · historical integration snapshot. For classroom startup instructions, see [SiMetropolis Edu](../README.md).
 
 The original English H3 frontend and 3D city (Original material by default, optional White study model) run together with the teammate’s **v0.1.0 narrative backend**. The existing `sandbox/web` remains the UI; `backend/server.py` serves it on the same local origin. No separate frontend build or dependency installation is needed. Python 3.9+ and a browser with WebGL2 are required.
 

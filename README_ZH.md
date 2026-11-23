@@ -1,19 +1,34 @@
 # SiMetropolis Edu · 塱原課堂
 
-**[下載 Mac 版](https://github.com/LollaFox/SiMetropolis-Edu/releases/latest/download/SiMetropolis-Edu-Mac.zip)** · **[下載 Windows 版](https://github.com/LollaFox/SiMetropolis-Edu/releases/latest/download/SiMetropolis-Edu-Windows.zip)**
-
 [English](README.md)
+
+## 在 Mac 開啟課堂
+
+在包含本說明檔的專案資料夾開啟「終端機」。先確認已安裝 Python 3.9 或更新版本，再執行以下指令安裝課堂所需套件。這一步只需執行一次，並需連接互聯網。
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r classroom/requirements.txt
+```
+
+在同一個資料夾執行以下指令，瀏覽器便會開啟教師專用頁面。上課期間請保持這個終端機視窗開啟。
+
+```sh
+.venv/bin/python -m classroom launch
+```
+
+如果關閉了教師分頁，請在另一個終端機視窗切換到同一個專案資料夾，再次執行啟動指令。原有的加入代碼、倒數時間及小組成果都會保留。
+
+## 在 Windows 開啟課堂
+
+在專案資料夾按兩下 **Open SiMetropolis Edu.cmd** 或原有的 **start-product.cmd** 捷徑。首次設定時請保持網絡連線。如果下載中斷，請重新連線並選擇 **Retry**。上課期間請保持啟動程式運作。再次按兩下捷徑即可重新開啟教師分頁。
 
 ## 開始課堂
 
-1. 將 ZIP 解壓縮到本機資料夾，然後按兩下 **Open SiMetropolis Edu**。Mac 版需要 macOS 12 或更新版本。如果你原本在專案資料夾使用 Windows 的 `start-product.cmd` 捷徑，這個捷徑也會開啟 Edu。
-2. 首次啟動時，請保持網際網路連線。啟動程式會顯示下載進度。如果下載中斷，請重新連線，然後選擇 **Retry**。
-3. 在教師網頁選擇 English 或繁體中文，然後按 **開始課堂**。45 分鐘倒數會立即開始。
-4. 連上課室網絡後，選擇 **投影加入資訊**。學生小組可以用連到同一個 Wi-Fi 或有線網絡的裝置掃描 QR 碼、開啟連結或輸入短代碼。
+1. 在教師分頁選擇 English 或繁體中文，然後按 **開始課堂**。45 分鐘倒數會立即開始。
+2. 選擇 **投影加入資訊**。學生小組可在連上課室網絡的裝置掃描 QR 碼、開啟連結或輸入短代碼。
 
 如果 Edu 偵測到網絡問題，教師網頁便會顯示 **開啟網絡設定**，並持續重試。重新連線後，加入資訊會自動恢復，原有倒數會繼續。
-
-上課期間請讓啟動程式保持運作。如果關閉了教師分頁，請在同一個資料夾再次按兩下 **Open SiMetropolis Edu**。課堂會以原有的加入代碼、倒數時間及小組成果重新開啟。
 
 教學與設定詳情請參閱[塱原課堂指南](classroom/README.md)。
 

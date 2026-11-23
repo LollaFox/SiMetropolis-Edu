@@ -1,6 +1,6 @@
 # Narrative city sandbox backend
 
-Backend development reference. For classroom downloads, see [SiMetropolis Edu](../README.md).
+Backend development reference. For classroom startup instructions, see [SiMetropolis Edu](../README.md).
 
 Teammate guides: [frontend API handoff (English)](docs/releases/FRONTEND_HANDOFF_EN.md) / [中文](docs/releases/FRONTEND_HANDOFF_ZH.md); [reading saved city history (English)](docs/releases/CITY_HISTORY_EN.md) / [中文](docs/releases/CITY_HISTORY_ZH.md).
 
