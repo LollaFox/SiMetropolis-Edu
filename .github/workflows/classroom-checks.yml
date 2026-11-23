@@ -14,3 +14,12 @@ jobs:
           python-version: "3.12"
       - run: python3 -m pip install -r classroom/requirements.txt
       - run: python3 -B -m unittest tests.test_group_crossing tests.test_teacher_startup tests.test_classroom_network
+
+  launch-lifetime:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -B -m unittest tests.test_launch_lifetime

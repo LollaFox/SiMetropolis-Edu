@@ -64,14 +64,15 @@ private enum SetupError: LocalizedError {
     }
 }
 
-private final class Launcher: NSObject, NSApplicationDelegate {
+final class Launcher: NSObject, NSApplicationDelegate {
     private let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 192),
                                   styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
     private let heading = NSTextField(labelWithString: "SiMetropolis Edu")
     private let status = NSTextField(wrappingLabelWithString: "Preparing Long Valley…")
     private let progress = NSProgressIndicator()
     private lazy var action = NSButton(title: "Retry", target: self, action: #selector(setupAction))
-    private var classroomProcesses = Set<Process>()
+    private var classroomService: Process?
+    private var reopenHelpers = Set<Process>()
     private var download: URLSessionDownloadTask?
     private var progressTimer: Timer?
     private var quitAfterSetup = false
@@ -118,7 +119,9 @@ private final class Launcher: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if classroomProcesses.contains(where: \.isRunning) {
+        if classroomService?.isRunning == true {
+            reopenTeacherBrowser()
+        } else if download == nil {
             openClassroom()
         }
         return true
@@ -132,7 +135,8 @@ private final class Launcher: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        for process in classroomProcesses where process.isRunning { process.interrupt() }
+        if let classroomService, classroomService.isRunning { classroomService.interrupt() }
+        for process in reopenHelpers where process.isRunning { process.interrupt() }
     }
 
     @objc private func setupAction() {
@@ -145,27 +149,47 @@ private final class Launcher: NSObject, NSApplicationDelegate {
     }
 
     private func openClassroom() {
+        if classroomService?.isRunning == true {
+            reopenTeacherBrowser()
+            return
+        }
         action.isHidden = true
         status.stringValue = "Preparing Long Valley…"
         do {
-            guard let resources = Bundle.main.resourceURL, let id = Bundle.main.bundleIdentifier else {
-                throw SetupError.invalidPackage
-            }
-            let files = FileManager.default
-            let support = try files.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                        appropriateFor: nil, create: true).appendingPathComponent(id)
-            try files.createDirectory(at: support, withIntermediateDirectories: true,
-                                      attributes: [.posixPermissions: 0o700])
-            let runtime = try Runtime.bundled(in: resources)
-            let destination = support.appendingPathComponent("runtime-\(runtime.sha256)")
-            if files.isExecutableFile(atPath: Runtime.python(in: destination).path) {
-                try startClassroom(runtimeAt: destination, resources: resources)
+            let installed = try installedClassroom()
+            if FileManager.default.isExecutableFile(atPath: Runtime.python(in: installed.destination).path) {
+                try spawnClassroom(runtimeAt: installed.destination, resources: installed.resources, role: .service)
             } else {
-                downloadRuntime(runtime, to: destination, resources: resources)
+                downloadRuntime(installed.runtime, to: installed.destination, resources: installed.resources)
             }
         } catch {
             showFailure(error)
         }
+    }
+
+    private func reopenTeacherBrowser() {
+        do {
+            let installed = try installedClassroom()
+            guard FileManager.default.isExecutableFile(atPath: Runtime.python(in: installed.destination).path) else {
+                return
+            }
+            try spawnClassroom(runtimeAt: installed.destination, resources: installed.resources, role: .helper)
+        } catch {
+            return
+        }
+    }
+
+    private func installedClassroom() throws -> (runtime: Runtime, destination: URL, resources: URL) {
+        guard let resources = Bundle.main.resourceURL, let id = Bundle.main.bundleIdentifier else {
+            throw SetupError.invalidPackage
+        }
+        let files = FileManager.default
+        let support = try files.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                    appropriateFor: nil, create: true).appendingPathComponent(id)
+        try files.createDirectory(at: support, withIntermediateDirectories: true,
+                                  attributes: [.posixPermissions: 0o700])
+        let runtime = try Runtime.bundled(in: resources)
+        return (runtime, support.appendingPathComponent("runtime-\(runtime.sha256)"), resources)
     }
 
     private func downloadRuntime(_ runtime: Runtime, to destination: URL, resources: URL) {
@@ -205,7 +229,7 @@ private final class Launcher: NSObject, NSApplicationDelegate {
                 }
                 do {
                     try outcome.get()
-                    try self.startClassroom(runtimeAt: destination, resources: resources)
+                    try self.spawnClassroom(runtimeAt: destination, resources: resources, role: .service)
                 } catch {
                     self.showFailure(error)
                 }
@@ -222,7 +246,7 @@ private final class Launcher: NSObject, NSApplicationDelegate {
         task.resume()
     }
 
-    private func startClassroom(runtimeAt destination: URL, resources: URL) throws {
+    private func spawnClassroom(runtimeAt destination: URL, resources: URL, role: ClassroomProcessRole) throws {
         let lesson = resources.appendingPathComponent("lesson")
         let process = Process()
         process.executableURL = Runtime.python(in: destination)
@@ -235,19 +259,29 @@ private final class Launcher: NSObject, NSApplicationDelegate {
         if environment["BROWSER"] == nil { environment["BROWSER"] = "/usr/bin/open %s" }
         process.environment = environment
         process.terminationHandler = { finished in
-            DispatchQueue.main.async {
-                self.classroomProcesses.remove(finished)
-                if finished.terminationStatus != 0 {
-                    self.showFailure(SetupError.classroomExited)
-                } else if self.classroomProcesses.isEmpty {
-                    NSApp.terminate(nil)
-                }
-            }
+            DispatchQueue.main.async { self.finish(finished, role: role) }
         }
         try process.run()
-        classroomProcesses.insert(process)
-        action.isHidden = true
-        status.stringValue = "Continue in your browser. Keep this window open while using the classroom."
+        if role == .service {
+            classroomService = process
+            action.isHidden = true
+            status.stringValue = "Continue in your browser. Keep this window open while using the classroom."
+        } else {
+            reopenHelpers.insert(process)
+        }
+    }
+
+    private func finish(_ finished: Process, role: ClassroomProcessRole) {
+        if role == .helper {
+            reopenHelpers.remove(finished)
+        } else {
+            classroomService = nil
+        }
+        if LaunchLifetime.replacesLiveClassWindow(role: role, status: finished.terminationStatus) {
+            showFailure(SetupError.classroomExited)
+        } else if LaunchLifetime.closesLauncher(role: role, status: finished.terminationStatus) {
+            NSApp.terminate(nil)
+        }
     }
 
     private func showFailure(_ error: Error) {
@@ -266,9 +300,3 @@ private final class Launcher: NSObject, NSApplicationDelegate {
         action.keyEquivalent = "\r"
     }
 }
-
-let application = NSApplication.shared
-private let launcher = Launcher()
-application.delegate = launcher
-application.setActivationPolicy(.regular)
-application.run()

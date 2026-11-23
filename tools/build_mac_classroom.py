@@ -78,7 +78,8 @@ def build(output, signing_identity, notary_profile):
 
         for architecture in ARCHITECTURES:
             run("/usr/bin/xcrun", "swiftc", "-O", "-module-cache-path", stage / "swift-cache",
-                "-target", f"{architecture}-apple-macos12.0", MAC / "Launcher.swift",
+                "-target", f"{architecture}-apple-macos12.0",
+                MAC / "LaunchLifetime.swift", MAC / "Launcher.swift", MAC / "main.swift",
                 "-o", stage / architecture)
         run("/usr/bin/lipo", "-create", *(stage / arch for arch in ARCHITECTURES), "-output", executable)
         archive = stage / "classroom.zip"
