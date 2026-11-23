@@ -258,10 +258,17 @@ final class Launcher: NSObject, NSApplicationDelegate {
         // Use Launch Services to open the default browser without Apple Events automation permissions.
         if environment["BROWSER"] == nil { environment["BROWSER"] = "/usr/bin/open %s" }
         process.environment = environment
-        process.terminationHandler = { finished in
-            DispatchQueue.main.async { self.finish(finished, role: role) }
-        }
-        try process.run()
+        try Self.runClassroomProcess(process, role: role, didFinish: { finished in
+            if role == .helper {
+                self.reopenHelpers.remove(finished)
+            } else {
+                self.classroomService = nil
+            }
+        }, showClassroomFailure: {
+            self.showFailure(SetupError.classroomExited)
+        }, closeLauncher: {
+            NSApp.terminate(nil)
+        })
         if role == .service {
             classroomService = process
             action.isHidden = true
@@ -271,17 +278,21 @@ final class Launcher: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func finish(_ finished: Process, role: ClassroomProcessRole) {
-        if role == .helper {
-            reopenHelpers.remove(finished)
-        } else {
-            classroomService = nil
+    static func runClassroomProcess(_ process: Process, role: ClassroomProcessRole,
+                                    didFinish: @escaping (Process) -> Void,
+                                    showClassroomFailure: @escaping () -> Void,
+                                    closeLauncher: @escaping () -> Void) throws {
+        process.terminationHandler = { finished in
+            DispatchQueue.main.async {
+                didFinish(finished)
+                if LaunchLifetime.replacesLiveClassWindow(role: role, status: finished.terminationStatus) {
+                    showClassroomFailure()
+                } else if LaunchLifetime.closesLauncher(role: role, status: finished.terminationStatus) {
+                    closeLauncher()
+                }
+            }
         }
-        if LaunchLifetime.replacesLiveClassWindow(role: role, status: finished.terminationStatus) {
-            showFailure(SetupError.classroomExited)
-        } else if LaunchLifetime.closesLauncher(role: role, status: finished.terminationStatus) {
-            NSApp.terminate(nil)
-        }
+        try process.run()
     }
 
     private func showFailure(_ error: Error) {

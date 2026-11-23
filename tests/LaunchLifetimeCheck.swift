@@ -1,23 +1,41 @@
-import Darwin
+import Foundation
 
-func fail(_ message: String) -> Never {
-    fputs(message + "\n", stderr)
-    exit(1)
-}
+@main
+struct LaunchLifetimeCheck {
+    enum WindowAction: Equatable {
+        case showFailure, closeLauncher
+    }
 
-if LaunchLifetime.replacesLiveClassWindow(role: .helper, status: 1) {
-    fail("A reopen helper's failure replaced the live class window. Only LaunchLifetime.replacesLiveClassWindow for the classroom service may do that.")
-}
-if !LaunchLifetime.replacesLiveClassWindow(role: .service, status: 1) {
-    fail("The classroom service exited with a failure and left the live class window in place.")
-}
-if LaunchLifetime.closesLauncher(role: .helper, status: 0) {
-    fail("A reopen helper's exit closed the launcher. Only LaunchLifetime.closesLauncher for the classroom service may do that.")
-}
-if !LaunchLifetime.closesLauncher(role: .service, status: 0) {
-    fail("The classroom service exited and left the launcher running.")
-}
-if LaunchLifetime.replacesLiveClassWindow(role: .service, status: 0)
-    || LaunchLifetime.closesLauncher(role: .service, status: 1) {
-    fail("A normal service exit must close the launcher, and a failed service exit must replace the window.")
+    @MainActor
+    static func check(_ role: ClassroomProcessRole, status: Int32, expecting expected: [WindowAction]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: status == 0 ? "/usr/bin/true" : "/usr/bin/false")
+        var handled = false
+        var actions: [WindowAction] = []
+        try Launcher.runClassroomProcess(process, role: role, didFinish: { finished in
+            precondition(finished === process && finished.terminationStatus == status)
+            handled = true
+        }, showClassroomFailure: {
+            actions.append(.showFailure)
+        }, closeLauncher: {
+            actions.append(.closeLauncher)
+        })
+
+        let deadline = Date().addingTimeInterval(5)
+        while !handled && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        guard handled, actions == expected else {
+            fputs("\(role) exit \(status): expected \(expected), recorded \(actions), handled=\(handled)\n", stderr)
+            exit(1)
+        }
+    }
+
+    @MainActor
+    static func main() throws {
+        try check(.helper, status: 0, expecting: [])
+        try check(.helper, status: 1, expecting: [])
+        try check(.service, status: 0, expecting: [.closeLauncher])
+        try check(.service, status: 1, expecting: [.showFailure])
+    }
 }
