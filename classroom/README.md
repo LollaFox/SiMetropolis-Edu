@@ -1,10 +1,6 @@
 # Long Valley classroom
 
-On macOS 12 or later, extract `SiMetropolis-Edu-Mac.zip` and double-click **Open SiMetropolis Edu**. The first launch downloads about 24 MB. If the download stops, check your connection and select **Retry**. After setup, you can open lesson preparation while disconnected.
-
-On Windows, extract `SiMetropolis-Edu-Windows.zip` to a local folder and double-click **Open SiMetropolis Edu**. Keep the computer connected to the internet for first-use setup. The launcher shows download progress and offers **Retry** if a download is interrupted. After setup, you can open the same copy while disconnected.
-
-On a prepared Mac checkout, double-click **Open SiMetropolis Edu** (`.command`).
+Follow the [Mac Terminal or Windows shortcut instructions](../README.md) to open the classroom from the project folder.
 
 The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
@@ -12,7 +8,9 @@ If Edu loses the classroom network or you start while disconnected, the timer ke
 
 If a returning group scans the restored QR and sees **Choose your starting site**, open **Help a group rejoin** in the private teacher tab. Select the site where the group **started**, even after **Pass the City**, and choose **Get group rejoin code**. Give the code privately to that group. On its device, the group enters the code and selects **Rejoin my group** to reopen its current site with its recorded crossing and chosen language. Each code works once. If the group needs another, select its starting site again to see the current code.
 
-If you spend more than two minutes choosing a browser profile, the launcher opens a fresh sign-in link for the same classroom. Continue in the new teacher tab.
+If you close the teacher tab during class, double-click **Open SiMetropolis Edu** again from the same installation. Your class reopens with the original join code and countdown. Groups can keep working in their existing tabs.
+
+If your sign-in link expires while you choose a browser profile, continue in the new teacher tab. If no tab opens, double-click **Open SiMetropolis Edu** again.
 
 ### Prepare a local checkout
 
@@ -88,7 +86,9 @@ On Mac and Windows, verify recovery both before starting and during a lesson. Di
 
 The launcher checks open the private sign-in link in Chromium, exercise language selection before class, and verify that a second browser cannot reuse the link.
 
-On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. The test builds and extracts the teacher ZIP, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then stops the launcher and reopens the same package with component downloads blocked.
+The launcher checks use Chromium to reopen a live class while a group keeps its tested crossing. They also cover separate installations used by the same teacher, a Mac checkout with a read-only classroom directory, and a delayed browser profile selection that overlaps another launch.
+
+On a Windows desktop with internet access, run the following in PowerShell to check first-use setup. Set `WINDOWS_DOWNLOAD_ZIP` to the downloaded ZIP to test that archive. The test extracts the archive, interrupts the Python transfer, selects **Retry** in the setup dialog, and opens the private teacher page. It then reopens the same package with component downloads blocked. On a connected LAN, it starts a class, tests a crossing, and reopens the teacher tab to check the code, deadline, and crossing.
 
 ```powershell
 $env:WINDOWS_DOWNLOAD_TEST = '1'
@@ -105,8 +105,15 @@ The sharing checks verify in both languages that a teacher can project the origi
 
 Use macOS with Xcode selected and Python 3 with pip. To create the ZIP for local testing, run `python3 tools/build_mac_classroom.py /tmp/SiMetropolis-Edu-Mac.zip`. The app includes both Mac architectures and the classroom’s Python dependencies. It downloads a pinned [standalone Python runtime](https://github.com/astral-sh/python-build-standalone/releases/tag/20261110) for the current architecture, verifies its SHA-256, and keeps it in the teacher’s Application Support folder.
 
-Pass `--signing-identity "Developer ID Application: …"` and `--notary-profile PROFILE` together to build the distribution ZIP. The script signs the app, submits it to Apple, and packages it with the stapled ticket. It extracts the final ZIP and checks the ticket, signature, and Gatekeeper assessment. Link the signed and notarized ZIP from the project download page after verifying it on a clean Mac. See [Apple's distribution testing guidance](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
+Pass `--signing-identity "Developer ID Application: …"` and `--notary-profile PROFILE` together to build the distribution ZIP. The script signs the app, submits it to Apple, and packages it with the stapled ticket. It extracts the final ZIP and checks the ticket, signature, and Gatekeeper assessment. Use this signed and notarized archive for distribution. See [Apple's distribution testing guidance](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
 
-Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and repeats with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
+Run `python3 -B -m unittest discover -s tests -p test_mac_classroom_package.py` to build and inspect the extracted package. Set `SIMETROPOLIS_MAC_TEST_ZIP` to the downloaded distribution ZIP to check Gatekeeper and the stapled ticket on the unmodified app. On a logged-in Mac, set `SIMETROPOLIS_MAC_TEST_ARCHIVE` to the native tarball listed in `tools/mac_classroom/runtime.json`. The test opens the app through Launch Services, signs in to lesson preparation, and reopens a running class with the download server offline. Set `SIMETROPOLIS_MAC_TEST_RETRY=1` on a runner with macOS Accessibility access to interrupt the first transfer and press **Retry** in the launcher.
 
-To check the distribution ZIP, download it in a browser on a clean Mac, extract it in Finder, and double-click **Open SiMetropolis Edu**. Interrupt the runtime transfer and verify **Retry** opens the private teacher page after reconnecting. Quit the launcher, disconnect Wi-Fi and Ethernet, and double-click the same app again. Lesson preparation should open in the browser.
+## Verify the teacher downloads
+
+The platform builds produce `SiMetropolis-Edu-Mac.zip` and `SiMetropolis-Edu-Windows.zip`.
+
+1. On a clean Mac and a clean Windows computer, download the distribution ZIP for that platform when available, extract it, and double-click **Open SiMetropolis Edu**. Check setup progress, interrupt the first download, and select **Retry** after reconnecting. When setup finishes, lesson preparation opens privately.
+2. On a working classroom network, start an English class on one platform and a Traditional Chinese class on the other. Check that projection is available and the teacher sees no network notice. Use a separate device on that network to join by link in one class and by QR and short code in the other. From the group device, check that the teacher view and projection require teacher access.
+3. Run a separate recovery check on each platform. Start disconnected and verify the teacher sees the notice and the original countdown starts. Reconnect and join from the second device. Then disconnect from an already connected class, confirm the notice appears and joining is withheld, and reconnect. Check joining returns without refreshing and the original timer continues.
+4. From the student device, test a crossing. Close the teacher tab while leaving the launcher running, then double-click the extracted app or shortcut again. Compare the code and countdown and replay the tested crossing on the student device.

@@ -11,25 +11,9 @@ Working simulation backend with the original frontend bundled unchanged. Python 
 - Historical city data / 历史城市数据：[English](backend/docs/releases/CITY_HISTORY_EN.md) · [中文](backend/docs/releases/CITY_HISTORY_ZH.md)
 - [Detailed backend guide / 后端详细说明](backend/README.md)
 
-## Offline quick start / 离线启动
+## Open the classroom / 開啟課堂
 
-Run from this extracted folder; open <http://127.0.0.1:8878/>. Stop an existing server before reusing its port.
-
-在解压后的项目根目录执行，浏览器打开上述地址。如端口已被占用，请先停止原服务。
-
-```sh
-python3 -B -m backend.server --port 8878 --preset northern-metropolis
-```
-
-This prepares a saved offline demonstration. For a new product run, open Configure, choose Default City, Function Zones, or Mixed Zones, choose 1 to 5 years, enter a DeepSeek API key, then review and confirm. PDF upload is disabled.
-
-启动时生成离线示例。新建产品运行时，打开 Configure，选择 Default City、Function Zones 或 Mixed Zones，选择 1 至 5 年，填写 DeepSeek API key，然后审阅并确认。PDF 上传已停用。
-
-## DeepSeek API key / DeepSeek API 密钥
-
-The current product does not read `api_key` or `backend/.data/credentials`. Enter the key in Configure. It stays in memory for that run and is not saved in the browser.
-
-当前产品不读取 `api_key` 或 `backend/.data/credentials`。在 Configure 中填写密钥。密钥只留在该次运行的内存中，不保存在浏览器。
+For the Long Valley classroom, follow the [English startup guide](../../README.md). 塱原課堂的啟動步驟見[繁體中文說明](../../README_ZH.md)。
 
 ## Government examples and original handoff / 政府示例及原始交接
 

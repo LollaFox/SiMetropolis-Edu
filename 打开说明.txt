@@ -1,4 +1,3 @@
-Windows：双击 start-product.cmd。浏览器和 Configure 画面会自动打开。
-macOS 不支持双击启动。请用 README.md 里的命令启动。
-在 Configure 中选择脚本、选择 1 至 5 年，并填写 DeepSeek API key。
-查看已保存城市请用 File > Load City。这不会开始新模拟，也不需要API key。
+1. 在 Mac 上，請依照 README_ZH.md 的終端機指令設定並開啟課堂。在 Windows 上，請在專案資料夾按兩下 Open SiMetropolis Edu.cmd。
+2. 在教師分頁選擇起始語言，再按「開始課堂」。連上課室網絡後，選擇「投影加入資訊」讓小組加入。
+3. 請保持終端機或啟動程式視窗開啟。如要重新開啟教師分頁，在 Mac 上請於另一個終端機視窗切換到同一個專案資料夾，再次執行啟動指令。在 Windows 上請再次按兩下捷徑。

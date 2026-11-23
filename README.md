@@ -1,59 +1,37 @@
-# Northern Metropolis · Integrated Frontend and Backend Product
+# SiMetropolis Edu · Long Valley classroom
 
-The [Long Valley classroom](classroom/README.md) runs the SiMetropolis Edu railway opening in Traditional Chinese and English.
+[繁體中文](README_ZH.md)
 
-This directory is a standalone runnable version. It uses the new frontend from `D:/Metropolis/Front/northern-metropolis-white-model` and brings in the earlier dual-scenario setup, the fiscal and resident model, and the government large-model capability. The source directories stay as they are, so you do not need to switch between two projects.
+## Open the classroom on Mac
 
-## Start
-
-On Windows, double-click `start-product.cmd`. That launcher finds Python 3.9 or newer without adding it to PATH. If none is installed, the first launch downloads a private copy into `runtime/` and does not change system settings.
-
-macOS does not support double-click. In Terminal, from this folder, run:
+Open Terminal in the project folder containing this README. With Python 3.9 or later installed, run these commands once to set up the classroom dependencies. This step needs internet access.
 
 ```sh
-python3 -B start_product.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r classroom/requirements.txt
 ```
 
-The browser opens http://127.0.0.1:8898/ when the server is ready, and Configure opens with the page. A new server start shows an empty city until you save Configure and run. Saved cities stay available under File > Load City. Close the terminal to stop the service. Do not start two processes that use the same data directory at the same time.
+To open the private teacher page in your browser, run this command from the same folder. Keep this Terminal window open during the lesson.
 
-No new simulation can run offline without a key. In Configure, choose a government script and enter a DeepSeek API key. To inspect a saved city, use File > Load City. The key is sent only to this local server for building narratives and is not saved in the browser. Government decision AI and PDF upload are disabled.
-
-## Using the web app
-
-1. Click Configure, or click Configure analysis before the first run. Both open the same settings.
-2. Choose a government script: Default City, Function Zones, or Mixed Zones.
-3. Choose how many years to simulate, from 1 to 5. Later years in the five-year script are not run.
-4. Enter a DeepSeek API key in the page. A run cannot start without one. The launcher does not read a key file.
-5. Save settings. The review screen opens when the key and script are accepted. Review the assumptions and confirm the run.
-6. At the bottom, view population, jobs, and construction progress month by month. Each script asks DeepSeek for a narrative on each completed building. Government start-date decisions stay on the fixed schedule.
-7. File > Load City opens saved results without starting a new simulation. Export study downloads the saved run. After a refresh, enter the key again before resuming an unfinished task.
-
-The DeepSeek key is used for per-building narratives. It is not used to decide when the government starts projects. That government-decision mode is disabled.
-
-## Saving and failures
-
-- `backend/.data/product/`: tasks, history, and full monthly archives for this product. Data from the old project is left unchanged.
-- Government inputs and outputs are saved every month. Replay reuses the saved decisions and does not ask the model again.
-- If the API errors, a project is illegal, or the budget is exceeded, the task fails and the completed months are kept. You can resume the original task. There is no silent rule-based fallback.
-- If the process is killed after the API has already run but before that month is saved, recovery may repeat that call. The request count shown in the UI is not the number of simulated months.
-- A successful finish means the selected months have been run. It does not guarantee that every construction target is complete.
-
-## Verification and limits
-
-94 backend tests and 513 frontend tests pass. A real Chrome browser has run the offline government mode for both scenarios: configure, review, 24 months, month switching, fiscal and decision display, and refresh without creating a duplicate task. The live provider path was verified with simulated HTTP responses. A paid online model integration has not been run yet.
-
-The original 3D overview is still a schematic projection. Use the 2D analysis for the exact layout. Results include assumptions and are not a city forecast. There is no automatic side-by-side comparison page. Select two independent results from history and export them to compare. Source and feature notes inherited from the frontend are kept in `docs/FRONTEND_SOURCE_README.md`.
-
-Verification commands:
-
-```powershell
-python -B -m unittest discover -s backend/tests -q
-$env:PYTHON="python"
-node --test sandbox/tests/test_*.mjs
+```sh
+.venv/bin/python -m classroom launch
 ```
 
-Browser check script: `tools/check_product.mjs`. It depends on an existing Playwright installation and Chrome. Use `PLAYWRIGHT_PATH`, `PRODUCT_BASE`, and `PRODUCT_LAYOUT` to set the module, service address, and scenario. This script only runs offline tests.
+If you close the teacher tab, run the launch command again in a second Terminal window from the same folder. Your class keeps its join code, timer, and group work.
+
+## Open the classroom on Windows
+
+In the project folder, double-click **Open SiMetropolis Edu.cmd** or the existing **start-product.cmd** shortcut. Keep internet access on during first-use setup. If a transfer stops, reconnect and select **Retry**. Keep the launcher running during the lesson. Double-click the shortcut again to reopen the teacher tab.
+
+## Start a lesson
+
+1. In the teacher tab, choose English or 繁體中文 and click **Start class**. The 45-minute timer starts immediately.
+2. Select **Project join information**. Groups on the classroom network can scan the QR code, follow the link, or enter the short code on their own device.
+
+If Edu detects a network problem, the teacher tab shows **Open network settings** and keeps retrying. Join information returns when the computer reconnects, and the original countdown continues.
+
+See the [Long Valley classroom guide](classroom/README.md) for teaching and setup details.
 
 ## License
 
-Original code in this repository is covered by the SiMetropolis Decision Sandbox Restricted License in `LICENSE`. Permission is limited to members of the SiMetropolis team in the Inter-University GenAI Hackathon for SDGs and to that competition's judges. The vendored Three.js files remain under the MIT License in `sandbox/web/vendor/THREE-LICENSE.txt`.
+See the [SiMetropolis Decision Sandbox Restricted License](LICENSE) for permitted use and distribution.

@@ -2,7 +2,6 @@
 
 import argparse
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 from .network import format_origin
@@ -28,7 +27,7 @@ def origin(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("classroom/.data"))
+    parser.add_argument("--data-dir", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("issue-teacher-credential", help="Print a new teacher credential")
     commands.add_parser("launch", help="Open private lesson preparation on this computer")
@@ -38,16 +37,15 @@ def main():
     serve.add_argument("--public-url", type=origin, help="Origin that group devices use")
     serve.add_argument("--duration-seconds", type=int, default=DEFAULT_CLASS_DURATION_SECONDS)
     args = parser.parse_args()
-    if args.command == "issue-teacher-credential":
-        print(TeacherCredentials(args.data_dir / "teachers").issue())
+    if args.command == "launch":
+        from .launcher import launch
+
+        launch(args.data_dir, DEFAULT_CLASS_DURATION_SECONDS)
         return
 
-    if args.command == "launch":
-        from .server import run
-
-        with TemporaryDirectory(prefix="simetropolis-edu-") as data:
-            run(None, 0, None, DEFAULT_CLASS_DURATION_SECONDS,
-                TeacherCredentials(Path(data) / "teachers"), launch_teacher=True)
+    credentials = TeacherCredentials((args.data_dir or Path("classroom/.data")) / "teachers")
+    if args.command == "issue-teacher-credential":
+        print(credentials.issue())
         return
 
     if not 0 <= args.port <= 65535 or args.duration_seconds < 1:
@@ -57,8 +55,7 @@ def main():
 
     from .server import run
 
-    run(args.host, args.port, args.public_url, args.duration_seconds,
-        TeacherCredentials(args.data_dir / "teachers"))
+    run(args.host, args.port, args.public_url, args.duration_seconds, credentials)
 
 
 if __name__ == "__main__":

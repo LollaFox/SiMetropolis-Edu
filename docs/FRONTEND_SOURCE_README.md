@@ -1,24 +1,8 @@
 # Northern Metropolis · Integrated Policy Sandbox
 
-**H3-round-2-right-ui-2026-10-17** · local integration snapshot, not a new upstream release.
+**H3-round-2-right-ui-2026-10-17** · historical integration snapshot. For classroom startup instructions, see [SiMetropolis Edu](../README.md).
 
 The original English H3 frontend and 3D city (Original material by default, optional White study model) run together with the teammate’s **v0.1.0 narrative backend**. The existing `sandbox/web` remains the UI; `backend/server.py` serves it on the same local origin. No separate frontend build or dependency installation is needed. Python 3.9+ and a browser with WebGL2 are required.
-
-## Start and preview
-
-On macOS, double-click **`start.command`**, or run from this folder:
-
-```sh
-python3 -B start_integrated.py
-```
-
-Open **http://127.0.0.1:8893/**. Keep the terminal running. The launcher detects an existing narrative server on this port and avoids starting a second one. To check it without changing anything:
-
-```sh
-python3 -B start_integrated.py --check
-```
-
-The product does not run without a DeepSeek key entered in Configure. It does not read a key file, and PDF upload is disabled. The integrated UI opens **Analysis sandbox**. The top-right **Analysis history** opens saved results at their first simulation month; the month is taken from the stored run, not fabricated after today.
 
 ## What to try
 
@@ -68,7 +52,7 @@ Use one server per data directory. Keep the whole narrative history directory wh
 
 Right-dock UI checks on **2026-10-17**: **513 JavaScript tests passed**. HTML nesting, 270 unique IDs, 44 root JavaScript modules/imports and 24 served resources passed. Read-only history checks left every saved file unchanged. Relative to the preceding left-dock source ZIP, only index.html and plan-analysis.css changed in product code. The entry and expanded dock are right-aligned at desktop and mobile breakpoints; the indicator and reveal direction follow that placement. Data adapters, materials, calculations and backend code remain unchanged. This is not new browser-layout or GPU acceptance.
 
-Browser automation was blocked by its local-URL policy. No new browser screenshot, GPU/layout acceptance or live DeepSeek quality claim is made. Refresh the original 8893 tab to inspect the result.
+Browser automation was blocked by its local-URL policy. No new browser screenshot, GPU/layout acceptance or live DeepSeek quality claim is made.
 
 This is **round 2 of 3**, scoped by the latest request to materials, plan analysis and change symbols. Policy-to-versioned-plan binding remains unimplemented; the third comparison/evidence round is also pending. See the [current right-dock UI guide](docs/右侧分析栏位置修正_2026-10-17.md) and the [round 2 guide](docs/第二轮_平面分析与符号库说明_2026-10-17.md) and [reusable change-symbol API](docs/变化符号库调用说明.md). The [original three-round plan](docs/三轮改进计划与第一轮说明_2026-10-17.md) is retained as historical guidance, with this guide taking precedence for round 2 scope.
 
