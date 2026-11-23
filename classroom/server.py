@@ -25,6 +25,7 @@ from .state import Classroom, ClassSession, SITES
 
 STATIC = Path(__file__).with_name("static")
 SWAP_WAIT_SECONDS = 15
+TICKET_LIFETIME_SECONDS = 120
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
@@ -52,7 +53,7 @@ class TeacherLaunch:
 
     def renew(self):
         self.ticket = secrets.token_urlsafe(32)
-        self._expires_at = monotonic() + 120
+        self._expires_at = monotonic() + TICKET_LIFETIME_SECONDS
 
     def is_pending(self, ticket):
         return self._credential is not None and secrets.compare_digest(self.ticket.encode(), ticket.encode())
@@ -115,18 +116,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.server.origin
         if not path.startswith("/teacher/project/"):
             return None
+        if not self._class_owns_projection(path, fields):
+            return None
+        return self.server.lan.join_origin()
+
+    def _class_owns_projection(self, path, fields):
         with self.classroom.lock:
             teacher = self.teacher_id()
             session = self.classroom.class_for_teacher(teacher) if teacher else None
             if session is None:
-                return None
+                return False
             projection = f"/teacher/project/{session.code}"
             join_status = path == projection + "/status" and fields.get("network") == ["1"]
-            if not join_status and path not in (projection, projection + "/", projection + "/qr.png"):
-                return None
-        # Windows adapter discovery can take seconds. Groups can still act and
-        # classes can expire while the teacher waits. get_page rechecks ownership.
-        return self.server.lan.join_origin()
+            return join_status or path in (projection, projection + "/", projection + "/qr.png")
 
     def local_request_origin(self):
         # Match the numeric address the browser reached, including on a multi-interface host.
@@ -348,10 +350,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 credential = launch.redeem(fields.get("ticket", [""])[0])
             except ExpiredLaunchTicket:
-                # Only the local browser opener receives the replacement link.
-                launch.renew()
-                open_teacher_browser(self.server)
-                return Response(202)
+                return self._renew_launch_for_local_opener()
             cookie = self.sign_in_teacher(credential)
             if cookie is None:
                 return Response(403)
@@ -374,8 +373,7 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(400)
             self.classroom.start(teacher, opening_language)
             if self.server.lan is not None:
-                # An adapter lookup from the last class can still be in flight.
-                self.server.lan = ClassroomLan(self.server.server_port)
+                self.server.lan = self.server.lan.abandon_lookup()
             return self.redirect("/teacher")
         if path == "/teacher/end":
             teacher = self.teacher_id()
@@ -474,6 +472,11 @@ class Handler(BaseHTTPRequestHandler):
         group.draft_design = draft
         group.revision += 1
         return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
+
+    def _renew_launch_for_local_opener(self):
+        self.server.teacher_launch.renew()
+        open_teacher_browser(self.server)
+        return Response(202)
 
 
 def open_teacher_browser(server):

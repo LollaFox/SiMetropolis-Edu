@@ -32,8 +32,9 @@ export function retryWindowsDownload(launcherPid, signal) {
   ], { windowsHide: true, timeout: 100000, signal });
 }
 
-// Encrypted HTTPS traffic keeps its original host and certificate. Cut the first
-// transfer after the TLS handshake, then let the real Retry finish the download.
+// Encrypted HTTPS traffic keeps its original host and certificate.
+const INTERRUPT_AFTER_OCTETS = 128 * 1024;
+
 export async function downloadConnection(t) {
   const configuredProxy = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.ALL_PROXY;
   const proxy = configuredProxy && new URL(configuredProxy);
@@ -75,7 +76,7 @@ export async function downloadConnection(t) {
       let bytes = 0;
       upstream.on('data', chunk => {
         bytes += chunk.length;
-        if (!state.interrupted && bytes >= 128 * 1024) {
+        if (!state.interrupted && bytes >= INTERRUPT_AFTER_OCTETS) {
           state.interrupted = true;
           client.destroy();
         }

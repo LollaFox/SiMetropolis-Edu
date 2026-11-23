@@ -14,7 +14,6 @@ from time import monotonic
 
 
 def format_origin(scheme, host, port):
-    """Format a validated origin with an unbracketed hostname."""
     host = f"[{host}]" if ":" in host else host.encode("idna").decode("ascii")
     default_port = 443 if scheme == "https" else 80
     suffix = f":{port}" if port not in {None, default_port} else ""
@@ -55,12 +54,27 @@ def _mac_addresses():
     return addresses
 
 
+ETHERNET_CSMACD = 6
+FAST_ETHER = 62
+FAST_ETHER_FX = 69
+IEEE80211 = 71
+GIGABIT_ETHERNET = 117
+WIRED_AND_WIFI = (ETHERNET_CSMACD, FAST_ETHER, FAST_ETHER_FX, IEEE80211, GIGABIT_ETHERNET)
+SIOCGIFFLAGS = 0x8913
+SIOCGIFADDR = 0x8915
+IFF_UP = 0x1
+IFF_BROADCAST = 0x2
+IFF_RUNNING = 0x40
+READY_INTERFACE = IFF_UP | IFF_BROADCAST | IFF_RUNNING
+CONTAINER_ENDPOINT = re.compile(r"eth\d+|en[opsx][\w.-]+|wl[anpsx][\w.-]+")
+UNSENT_ROUTE_PROBE = ("192.0.2.1", 9)
+
+
 def _windows_addresses():
-    # IANA interface types for Ethernet and Wi-Fi exclude cellular modems.
-    # Joining by index also works with renamed or localized adapter names.
+    interface_types = ",".join(str(kind) for kind in WIRED_AND_WIFI)
     command = (
         "$ids = (Get-NetAdapter -Physical | Where-Object { $_.InterfaceOperationalStatus -eq 1 "
-        "-and $_.InterfaceType -in 6,62,69,71,117 }).ifIndex; "
+        f"-and $_.InterfaceType -in {interface_types} }}).ifIndex; "
         "Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -SkipAsSource $false "
         "| Where-Object { $ids -contains $_.InterfaceIndex } | ForEach-Object { $_.IPAddress }"
     )
@@ -70,31 +84,28 @@ def _windows_addresses():
 def _linux_addresses():
     import fcntl
 
-    physical, ethernet = [], []
+    physical, container = [], []
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
             for _, name in socket.if_nameindex():
-                # Linux exposes physical adapters through sysfs. A CI container
-                # can have just its own Ethernet endpoint and no hardware entry.
                 if (Path("/sys/class/net") / name / "device").exists():
                     addresses = physical
-                elif re.fullmatch(r"eth\d+|en[opsx][\w.-]+|wl[anpsx][\w.-]+", name):
-                    addresses = ethernet
+                elif CONTAINER_ENDPOINT.fullmatch(name):
+                    addresses = container
                 else:
                     continue
                 request = struct.pack("256s", name.encode())
                 try:
-                    flags = struct.unpack_from("H", fcntl.ioctl(probe, 0x8913, request), 16)[0]
-                    # IFF_UP, IFF_BROADCAST and IFF_RUNNING
-                    if flags & 0x43 != 0x43:
+                    flags = struct.unpack_from("H", fcntl.ioctl(probe, SIOCGIFFLAGS, request), 16)[0]
+                    if (flags & READY_INTERFACE) != READY_INTERFACE:
                         continue
-                    result = fcntl.ioctl(probe, 0x8915, request)  # SIOCGIFADDR
+                    result = fcntl.ioctl(probe, SIOCGIFADDR, request)
                     addresses.append(socket.inet_ntoa(result[20:24]))
                 except OSError:
                     continue
     except OSError:
         pass
-    return physical or ethernet
+    return physical or container
 
 
 def local_join_origin(port):
@@ -115,24 +126,30 @@ def local_join_origin(port):
             continue
         if not (address.is_loopback or address.is_unspecified or address.is_multicast or address.is_reserved):
             addresses.append(address)
-    # A self-assigned address can still work on a local link with no gateway.
-    addresses = [address for address in addresses if not address.is_link_local] or addresses
+    addresses = _prefer_routable(addresses)
     if not addresses:
         return None
 
     selected = addresses[0]
     if len(addresses) > 1:
-        # Use the route only to choose between known LAN addresses. UDP connect
-        # asks the kernel which source it would use without sending a packet.
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
-                route.connect(("192.0.2.1", 9))
-                preferred = IPv4Address(route.getsockname()[0])
+            preferred = _source_chosen_by_route()
             if preferred in addresses:
                 selected = preferred
         except OSError:
             pass
     return format_origin("http", str(selected), port)
+
+
+def _prefer_routable(addresses):
+    routable = [address for address in addresses if not address.is_link_local]
+    return routable or addresses
+
+
+def _source_chosen_by_route():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+        route.connect(UNSENT_ROUTE_PROBE)
+        return IPv4Address(route.getsockname()[0])
 
 
 class ClassroomLan:
@@ -150,3 +167,6 @@ class ClassroomLan:
                 self._origin = local_join_origin(self.port)
                 self._refresh_after = monotonic() + 5
             return self._origin
+
+    def abandon_lookup(self):
+        return ClassroomLan(self.port)

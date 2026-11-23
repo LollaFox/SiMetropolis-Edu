@@ -1,6 +1,12 @@
 import AppKit
 import ApplicationServices
 
+let EX_NOPERM: Int32 = 77
+
+func accessibilityIsTrustedWithoutPrompt() -> Bool {
+    AXIsProcessTrusted()
+}
+
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
     exit(1)
@@ -44,7 +50,7 @@ case "quit":
     guard app.terminate() else { fail("macOS declined the test launcher's Quit request") }
     waitFor("the test launcher to quit") { app.isTerminated }
 case "wait-for-retry", "retry":
-    guard AXIsProcessTrusted() else { exit(77) } // EX_NOPERM. Do not prompt for Accessibility access.
+    guard accessibilityIsTrustedWithoutPrompt() else { exit(EX_NOPERM) }
     let target = AXUIElementCreateApplication(app.processIdentifier)
     waitFor("the enabled Retry button") {
         let windows = attribute(target, kAXWindowsAttribute) as? [AXUIElement] ?? []

@@ -47,6 +47,11 @@ function Save-Component($Component, [string]$Destination) {
     return $false
 }
 
+function Publish-VerifiedRuntime([string]$Staging, [string]$Runtime) {
+    if (Test-Path -LiteralPath $Runtime) { Remove-Item -LiteralPath $Runtime -Recurse -Force }
+    [IO.Directory]::Move($Staging, $Runtime)
+}
+
 function Install-ClassroomPython {
     $manifest = Join-Path $PSScriptRoot 'windows-classroom-components.json'
     $components = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
@@ -67,11 +72,11 @@ function Install-ClassroomPython {
 
     [IO.Directory]::CreateDirectory($cache) | Out-Null
     $lockPath = "$runtime.lock"
-    $lock = $null
+    $runtimeReplacement = $null
     $waiting = $false
-    while (-not $lock) {
+    while (-not $runtimeReplacement) {
         try {
-            $lock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
+            $runtimeReplacement = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
         } catch [IO.IOException] {
             if (($_.Exception.HResult -band 0xffff) -ne 32) { throw }
             if (-not $waiting) { Write-Host 'Waiting for SiMetropolis Edu setup in the other window...' }
@@ -110,12 +115,10 @@ function Install-ClassroomPython {
             throw 'The downloaded classroom components could not start.'
         }
 
-        # The lock protects replacement of an unusable runtime. Publish only a complete setup.
-        if (Test-Path -LiteralPath $runtime) { Remove-Item -LiteralPath $runtime -Recurse -Force }
-        [IO.Directory]::Move($staging, $runtime)
+        Publish-VerifiedRuntime $staging $runtime
         return $python
     } finally {
-        $lock.Dispose()
+        $runtimeReplacement.Dispose()
         if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     }
 }

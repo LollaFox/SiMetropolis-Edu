@@ -91,7 +91,7 @@ async function prepareShortcut(temporary, env) {
 
 async function launchClassroom(t, {
   shortcut = false, windowsScript, browser, delayedProfile = false, env = {}, retryDownload = false,
-  networkAddress, settingsPlatform = '', durationSeconds = 2700,
+  networkAddress, settingsPlatform = '', durationSeconds = 2700, trackCleanup,
 } = {}) {
   const temporary = await mkdtemp(join(tmpdir(), 'long-valley-launch-'));
   let launcher;
@@ -107,10 +107,12 @@ async function launchClassroom(t, {
     }
     await closed?.catch(() => {});
   }
-  t.after(async () => {
+  const release = async () => {
     await stop();
     await rm(temporary, { recursive: true, force: true });
-  });
+  };
+  if (trackCleanup) trackCleanup.push(release);
+  else t.after(release);
   const browserCommand = join(temporary, 'open-browser.mjs');
   // A foreground opener waits for the page before returning control to the launcher.
   await writeFile(browserCommand, `
@@ -191,9 +193,9 @@ with ExitStack() as fixtures:
 from unittest.mock import patch
 from classroom.__main__ import main
 
-# Issue the first ticket at time zero; the profile opens 121 seconds later.
+from classroom.server import TICKET_LIFETIME_SECONDS
 clock = iter([0])
-with patch('classroom.server.monotonic', new=lambda: next(clock, 121)):
+with patch('classroom.server.monotonic', new=lambda: next(clock, TICKET_LIFETIME_SECONDS + 1)):
     main()
 `, 'launch'];
   }
@@ -662,32 +664,36 @@ test('the Windows download retries interrupted setup and reopens lesson preparat
   timeout: 240000,
 }, async (t) => {
   const temporary = await mkdtemp(join(tmpdir(), 'long-valley-windows-'));
-  try {
-    const windowsScript = await extractWindowsDownload(temporary);
-    const connection = await downloadConnection(t);
-    const first = await launchClassroom(t, { windowsScript, env: connection.env, retryDownload: true });
-    assert.ok(connection.interrupted, 'A required download was interrupted after receiving bytes');
-    assert.match(first.progress, /#+|\d+(\.\d+)?%/, 'The launcher displayed download progress');
-    const teacher = await participant(first.browser);
-    await teacher.goto(first.launchUrl.href);
-    await teacher.waitForURL(`${first.launchUrl.origin}/teacher`);
-    await teacher.getByRole('button', { name: 'Start class' }).waitFor();
-    await first.stop();
+  const releases = [];
+  t.after(async () => {
+    while (releases.length) await releases.pop()();
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const windowsScript = await extractWindowsDownload(temporary);
+  const connection = await downloadConnection(t);
+  const first = await launchClassroom(t, {
+    windowsScript, env: connection.env, retryDownload: true, trackCleanup: releases,
+  });
+  assert.ok(connection.interrupted, 'A required download was interrupted after receiving bytes');
+  assert.match(first.progress, /#+|\d+(\.\d+)?%/, 'The launcher displayed download progress');
+  const teacher = await participant(first.browser);
+  await teacher.goto(first.launchUrl.href);
+  await teacher.waitForURL(`${first.launchUrl.origin}/teacher`);
+  await teacher.getByRole('button', { name: 'Start class' }).waitFor();
+  await first.stop();
 
-    connection.offline = true;
-    const offline = await launchClassroom(t, { windowsScript, env: connection.env, browser: first.browser });
-    assert.equal(connection.offlineAttempts, 0, 'The installed launcher should open without requesting components');
-    assert.deepEqual(offline.setupMessages, []);
-    const returning = await participant(offline.browser);
-    await returning.route('**/*', route => new URL(route.request().url()).origin === offline.launchUrl.origin
-      ? route.continue() : route.abort());
-    await returning.goto(offline.launchUrl.href);
-    await returning.waitForURL(`${offline.launchUrl.origin}/teacher`);
-    await returning.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor();
-  } finally {
-    // Registered after the launcher hooks so even a failed launch releases its runtime first.
-    t.after(() => rm(temporary, { recursive: true, force: true }));
-  }
+  connection.offline = true;
+  const offline = await launchClassroom(t, {
+    windowsScript, env: connection.env, browser: first.browser, trackCleanup: releases,
+  });
+  assert.equal(connection.offlineAttempts, 0, 'The installed launcher should open without requesting components');
+  assert.deepEqual(offline.setupMessages, []);
+  const returning = await participant(offline.browser);
+  await returning.route('**/*', route => new URL(route.request().url()).origin === offline.launchUrl.origin
+    ? route.continue() : route.abort());
+  await returning.goto(offline.launchUrl.href);
+  await returning.waitForURL(`${offline.launchUrl.origin}/teacher`);
+  await returning.getByRole('heading', { name: 'Open a Long Valley class' }).waitFor();
 });
 
 test('a slow browser profile selection opens a fresh private teacher tab', { timeout: 30000 }, async (t) => {

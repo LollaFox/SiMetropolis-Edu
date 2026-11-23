@@ -65,8 +65,8 @@ class ClassroomNetworkTests(unittest.TestCase):
 
         def ioctl(probe, operation, request):
             name = request.split(b"\0", 1)[0].decode()
-            if operation == 0x8913:
-                return bytes(16) + struct.pack("H", 0x43)
+            if operation == network.SIOCGIFFLAGS:
+                return bytes(16) + struct.pack("H", network.READY_INTERFACE)
             return bytes(20) + socket.inet_aton(addresses[name])
 
         with patch.dict(sys.modules, fcntl=SimpleNamespace(ioctl=ioctl)), patch.object(sys, "platform", "linux"):

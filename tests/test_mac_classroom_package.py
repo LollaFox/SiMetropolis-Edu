@@ -98,10 +98,9 @@ class MacClassroomPackageTests(unittest.TestCase):
         browser_url = self.folder / "browser-url"
         browser_url.unlink(missing_ok=True)
         opener = self.folder / "test-browser"
-        # Record the classroom PID alongside its URL in case teardown finds a surviving server.
         pending = shlex.quote(str(self.folder / "pending-browser-url"))
-        opener.write_text(f'#!/bin/sh\nprintf "%s\\n%s\\n" "$1" "$PPID" > {pending}\n'
-                          f'mv {pending} {shlex.quote(str(browser_url))}\n')
+        opener.write_text("#!/bin/sh\n" + record_browser_url_and_parent_pid(
+            pending, shlex.quote(str(browser_url))))
         opener.chmod(0o700)
         subprocess.run(["/usr/bin/open", "-n", "--arch", platform.machine(), "--env", f"CFFIXED_USER_HOME={self.folder}",
                         "--env", f"TMPDIR={self.folder}", "--env", f'BROWSER="{opener}" %s', self.app], check=True)
@@ -112,12 +111,12 @@ class MacClassroomPackageTests(unittest.TestCase):
                 subprocess.run([self.driver, "quit", self.app], check=True)
             finally:
                 if browser_url.exists():
-                    entry, child = browser_url.read_text().splitlines()
-                    port = urlsplit(entry).port
+                    url, parent_pid = browser_url.read_text().splitlines()
+                    port = urlsplit(url).port
                     deadline = monotonic() + 5
                     while accepts_connection(port):
                         if monotonic() >= deadline:
-                            os.kill(int(child), signal.SIGTERM)
+                            os.kill(int(parent_pid), signal.SIGTERM)
                             self.fail("The classroom still accepted connections after its launcher quit")
                         sleep(0.1)
 
@@ -137,6 +136,13 @@ class MacClassroomPackageTests(unittest.TestCase):
             self.assertEqual(response.status, 204)
         with browser.open(entry._replace(path="/teacher", fragment="").geturl(), timeout=5) as response:
             self.assertIn(b"Start class", response.read())
+
+
+DROPPED_BODY_OCTETS = 32 * 1024
+
+
+def record_browser_url_and_parent_pid(pending, published):
+    return f'printf "%s\\n%s\\n" "$1" "$PPID" > {pending}\nmv {pending} {published}\n'
 
 
 def accepts_connection(port):
@@ -160,8 +166,7 @@ def serve_runtime(archive):
                 if connected.is_set():
                     shutil.copyfileobj(runtime, self.wfile)
                 else:
-                    # Close mid-body with a larger declared length, as on a dropped connection.
-                    self.wfile.write(runtime.read(32768))
+                    self.wfile.write(runtime.read(DROPPED_BODY_OCTETS))
 
         def log_message(self, *_):
             pass
