@@ -19,8 +19,7 @@ The shortcuts can use a Python 3.9 or newer virtual environment named `.venv` be
 Mac:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r classroom/requirements.txt
+sh classroom/mac_teacher.sh setup
 ```
 
 Windows:

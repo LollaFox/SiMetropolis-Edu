@@ -4,20 +4,13 @@
 
 ## Open the classroom on Mac
 
-Open Terminal in the project folder containing this README. With Python 3.9 or later installed, run these commands once to set up the classroom dependencies. This step needs internet access.
+Open Terminal in the project folder containing this README. With Python 3.9 or later installed, run:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r classroom/requirements.txt
+sh classroom/mac_teacher.sh
 ```
 
-To open the private teacher page in your browser, run this command from the same folder. Keep this Terminal window open during the lesson.
-
-```sh
-.venv/bin/python -m classroom launch
-```
-
-If you close the teacher tab, run the launch command again in a second Terminal window from the same folder. Your class keeps its join code, timer, and group work.
+The first run needs internet access and installs the classroom. Leave that Terminal window open during the lesson. To reopen the teacher tab, run the same command in a second Terminal window from the same folder. Your class keeps its join code, timer, and group work.
 
 ## Open the classroom on Windows
 
