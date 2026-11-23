@@ -7,12 +7,22 @@ from threading import Event, Lock
 from time import monotonic
 from typing import Optional
 
-from .investigation import Comparison, Design
+from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Comparison, Design
 
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LENGTH = 8
 SITES = ("A", "B")
+_DESIGN_FIELDS = {"alignment", "crossing_type", "access"}
+_VIEWS = {"proposed", "baseline", "replay", "reset"}
+
+
+@dataclass(frozen=True)
+class FormReceipt:
+    status: int
+    notice: str = ""
+    anchor: str = ""
+    language_changed: bool = False
 
 
 def record_comparison(collection, comparison):
@@ -70,6 +80,62 @@ class Group:
             self.tested_design = self.saved_design
         self.draft_design = self.tested_design
         self.show_works = True
+
+    def receive_form(self, submitted_site, action, fields, session, languages):
+        """Apply a group form. A design or view counts only on this group's current site."""
+        current_site = submitted_site == self.site
+        draft = self.draft_design
+        if current_site and (action == "design" or fields.keys() & _DESIGN_FIELDS):
+            alignment = fields.get("alignment", [""])[0]
+            crossing_type = fields.get("crossing_type", [""])[0]
+            access_route = fields.get("access", [""])[0]
+            if (alignment not in ALIGNMENTS or crossing_type not in CROSSING_TYPES
+                    or access_route not in ACCESS_ROUTES):
+                return FormReceipt(400)
+            draft = Design(alignment, crossing_type, access_route)
+
+        language_changed = False
+        anchor = "#spring-comparison"
+        notice = ""
+        if action == "language":
+            preferred = fields.get("language", [""])[0]
+            if preferred not in languages:
+                return FormReceipt(400)
+            self.language = preferred
+            language_changed = True
+            anchor = ""
+
+        if action == "share":
+            comparison = self.rendered_comparisons.get(fields.get("comparison", [""])[0])
+            if comparison is None:
+                return FormReceipt(400)
+            session.share_comparison(comparison)
+            notice = "shared"
+            if not current_site or fields.get("revision", [""])[0] != str(self.revision):
+                return FormReceipt(303, notice, anchor, language_changed)
+
+        if not current_site:
+            return FormReceipt(303, "swapped", "#current-site", language_changed)
+
+        if action == "design":
+            self.tested_design = draft
+            self.show_works = True
+            if fields.get("save") == ["1"] and not session.swapped:
+                self.saved_design = draft
+                notice = "saved"
+        elif action == "view":
+            view = fields.get("view", [""])[0]
+            if view not in _VIEWS:
+                return FormReceipt(400)
+            self.show_works = view != "baseline"
+            if view == "reset":
+                draft = self.tested_design = Design()
+                anchor = "#spring-investigation"
+            elif view == "replay":
+                notice = "replayed"
+        self.draft_design = draft
+        self.revision += 1
+        return FormReceipt(303, notice, anchor, language_changed)
 
 
 @dataclass

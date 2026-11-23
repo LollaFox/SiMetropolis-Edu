@@ -18,7 +18,6 @@ import qrcode
 from qrcode.image.pure import PyPNGImage
 
 from . import views
-from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
 from .network import ClassroomLan, format_origin, has_network_settings, open_network_settings
 from .state import Classroom, ClassSession, SITES
 
@@ -441,61 +440,17 @@ class Handler(BaseHTTPRequestHandler):
                                  self.session_cookie("group_language", session.groups[token].language, path))
         if group is None or action not in {"language", "design", "view", "share"}:
             return Response(404)
-        current_site = fields.get("site", [""])[0] == group.site
-        draft = group.draft_design
-        if current_site and (action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}):
-            alignment = fields.get("alignment", [""])[0]
-            crossing_type = fields.get("crossing_type", [""])[0]
-            access_route = fields.get("access", [""])[0]
-            if (alignment not in ALIGNMENTS or crossing_type not in CROSSING_TYPES
-                    or access_route not in ACCESS_ROUTES):
-                return Response(400)
-            draft = Design(alignment, crossing_type, access_route)
-
-        anchor = "#spring-comparison"
-        notice = ""
+        receipt = group.receive_form(
+            fields.get("site", [""])[0], action, fields, session, views.LANGUAGES,
+        )
+        if receipt.status != 303:
+            return Response(receipt.status)
         language_cookie = None
-        if action == "language":
-            preferred = fields.get("language", [""])[0]
-            if preferred not in views.LANGUAGES:
-                return Response(400)
-            group.language = preferred
-            language_cookie = self.session_cookie("group_language", preferred, f"/join/{code}")
-            anchor = ""
-
+        if receipt.language_changed:
+            language_cookie = self.session_cookie("group_language", group.language, f"/join/{code}")
         join_path = student_join_path(session, language=group.language if session.swapped else None)
-        if action == "share":
-            comparison = group.rendered_comparisons.get(fields.get("comparison", [""])[0])
-            if comparison is None:
-                return Response(400)
-            session.share_comparison(comparison)
-            notice = "&notice=shared"
-            # A stale tab can send its captured maps without resetting newer controls.
-            if not current_site or fields.get("revision", [""])[0] != str(group.revision):
-                return self.redirect(f"{join_path}{notice}{anchor}")
-
-        # A language preference travels with the group. Design and view actions belong to the site.
-        if not current_site:
-            return self.redirect(f"{join_path}&notice=swapped#current-site", language_cookie)
-        if action == "design":
-            group.tested_design = draft
-            group.show_works = True
-            if fields.get("save") == ["1"] and not session.swapped:
-                group.saved_design = draft
-                notice = "&notice=saved"
-        elif action == "view":
-            view = fields.get("view", [""])[0]
-            if view not in {"proposed", "baseline", "replay", "reset"}:
-                return Response(400)
-            group.show_works = view != "baseline"
-            if view == "reset":
-                draft = group.tested_design = Design()
-                anchor = "#spring-investigation"
-            elif view == "replay":
-                notice = "&notice=replayed"
-        group.draft_design = draft
-        group.revision += 1
-        return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
+        notice = f"&notice={receipt.notice}" if receipt.notice else ""
+        return self.redirect(f"{join_path}{notice}{receipt.anchor}", language_cookie)
 
 
 def open_teacher_browser(server, *, initial=False):
