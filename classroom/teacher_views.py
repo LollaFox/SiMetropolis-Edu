@@ -1,5 +1,7 @@
 """Teacher sign-in, lesson selection and live classroom controls."""
 
+from html import escape
+from json import dumps
 from math import ceil
 
 from .localization import words
@@ -7,11 +9,17 @@ from .state import SITES
 from .views import COPY as CLASSROOM_COPY, LANGUAGES, comparison_url, network_notice
 
 
-COPY = {
-    **CLASSROOM_COPY,
+SIGN_IN_COPY = {
     "credential": ("Teacher credential", "教師憑證"),
     "sign_in": ("Sign in", "登入"),
+    "missing_credential": ("Enter your teacher credential", "請輸入教師憑證。"),
     "bad_credential": ("Check your teacher credential and try again.", "請檢查教師憑證，然後再試一次。"),
+    "language": ("Language", "語言"),
+}
+
+COPY = {
+    **CLASSROOM_COPY,
+    **SIGN_IN_COPY,
     "launch_wait": ("Opening the teacher view…", "正在開啟教師介面⋯"),
     "launch_renewed": ("Your sign-in link expired. Continue in the new teacher tab. "
                        "If no tab opens, double-click Open SiMetropolis Edu again.",
@@ -37,7 +45,6 @@ COPY = {
                          "請私下把這個一次性重入碼交給從場地 {} 出發的小組。"),
     "no_group": ("No group has started at Site {} yet.", "暫時未有小組從場地 {} 出發。"),
     "back_to_teacher": ("Back to teacher view", "返回教師介面"),
-    "language": ("Language", "語言"),
     "unit": ("Unit", "單元"),
     "valley": ("Long Valley", "塱原"),
     "choose_lesson": ("Choose a lesson", "選擇課節"),
@@ -131,7 +138,7 @@ def language_switch(language, path, label):
     return f'<div class="lang" role="group" aria-label="{label}">{links}</div>'
 
 
-def sign_in(language, *, invalid=False, launching=False):
+def sign_in(language, *, error=None, launching=False):
     t = words(language, COPY)
     scripts = ["teacher-scene.js"]
     switch = ""
@@ -143,14 +150,17 @@ def sign_in(language, *, invalid=False, launching=False):
           <p id="launch-error" class="error" role="alert" hidden>{t["launch_error"]}</p>
         </div>"""
     else:
+        scripts.append("teacher-sign-in.js")
         switch = language_switch(language, "/teacher", t["language"])
-        error = t["bad_credential"] if invalid else ""
-        form = f"""<form class="signin-form" method="post" action="/teacher/sign-in?lang={language}">
+        message = t[error] if error else ""
+        translations = escape(dumps({lang: words(lang, SIGN_IN_COPY) for lang in LANGUAGES}, ensure_ascii=False))
+        form = f"""<form class="signin-form" method="post" action="/teacher/sign-in?lang={language}"
+          data-copy="{translations}" data-error="{error or ''}" novalidate>
           <label for="credential">{t["credential"]}</label>
           <input id="credential" name="credential" type="password" autocomplete="current-password" required
-            autofocus autocapitalize="off" spellcheck="false" aria-describedby="cred-error" aria-invalid="{str(invalid).lower()}">
-          <p class="error" id="cred-error" role="alert">{error}</p>
-          <button class="btn btn-primary">{t["sign_in"]}</button>
+            autofocus autocapitalize="off" spellcheck="false" aria-describedby="cred-error" aria-invalid="{str(error is not None).lower()}">
+          <p class="error" id="cred-error" role="alert">{message}</p>
+          <button class="btn btn-primary" type="submit">{t["sign_in"]}</button>
         </form>"""
     return document(language, t["sign_in"], "signin", f"""
 <div class="signin">
