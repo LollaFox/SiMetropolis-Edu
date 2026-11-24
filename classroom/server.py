@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from ipaddress import IPv4Address
 from pathlib import Path
+import re
 import secrets
 from subprocess import SubprocessError
 from threading import Thread
@@ -18,7 +19,6 @@ import qrcode
 from qrcode.image.pure import PyPNGImage
 
 from . import views
-from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Design
 from .network import ClassroomLan, format_origin, has_network_settings, open_network_settings
 from .state import Classroom, ClassSession, SITES
 
@@ -28,6 +28,7 @@ SWAP_WAIT_SECONDS = 15
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
+    "/join-group.js": ("join-group.js", "text/javascript; charset=utf-8"),
     "/teacher-launch.js": ("teacher-launch.js", "text/javascript; charset=utf-8"),
 }
 
@@ -419,83 +420,57 @@ class Handler(BaseHTTPRequestHandler):
                 return self.group_action(code, action, language, fields)
         return Response(404, views.unavailable(language))
 
+    def group_entry(self, session, action, token, fields):
+        join_path = student_join_path(session)
+        if token in session.groups:
+            return Response(200) if action == "resume" else self.redirect(join_path)
+
+        browser_key = fields.get("browser_key", [""])[0]
+        if not re.fullmatch(r"[0-9a-f]{32}", browser_key):
+            return Response(400)
+        if action == "resume":
+            token = session.group_token_for_browser(browser_key)
+            if token is None:
+                return Response(204)
+        elif action == "take-site":
+            token = session.take_site(fields.get("site", [""])[0], browser_key=browser_key)
+            if token is None:
+                return self.redirect(f"{join_path}&taken=1")
+        else:
+            token = session.redeem_rejoin_code(fields.get("rejoin_code", [""])[0], browser_key=browser_key)
+            if token is None:
+                return self.redirect(f"{join_path}&notice=invalid-rejoin#rejoin-group")
+
+        path = f"/join/{session.code}"
+        cookies = (
+            self.session_cookie("group_session", token, path),
+            self.session_cookie("group_language", session.groups[token].language, path),
+        )
+        if action == "resume":
+            return Response(200, headers=tuple(("Set-Cookie", cookie) for cookie in cookies))
+        return self.redirect(join_path, *cookies)
+
     def group_action(self, code, action, language, fields):
         session = self.classroom.active_class(code)
         if session is None:
             return self.closed_join(code, language)
-        group = session.groups.get(self.cookie_value("group_session"))
-        if action in {"take-site", "rejoin"}:
-            join_path = student_join_path(session)
-            if group:
-                return self.redirect(join_path)
-            if action == "take-site":
-                token = session.take_site(fields.get("site", [""])[0])
-                if token is None:
-                    return self.redirect(f"{join_path}&taken=1")
-            else:
-                token = session.redeem_rejoin_code(fields.get("rejoin_code", [""])[0])
-                if token is None:
-                    return self.redirect(f"{join_path}&notice=invalid-rejoin#rejoin-group")
-            path = f"/join/{code}"
-            return self.redirect(join_path, self.session_cookie("group_session", token, path),
-                                 self.session_cookie("group_language", session.groups[token].language, path))
+        token = self.cookie_value("group_session")
+        if action in {"take-site", "rejoin", "resume"}:
+            return self.group_entry(session, action, token, fields)
+        group = session.groups.get(token)
         if group is None or action not in {"language", "design", "view", "share"}:
             return Response(404)
-        current_site = fields.get("site", [""])[0] == group.site
-        draft = group.draft_design
-        if current_site and (action == "design" or fields.keys() & {"alignment", "crossing_type", "access"}):
-            alignment = fields.get("alignment", [""])[0]
-            crossing_type = fields.get("crossing_type", [""])[0]
-            access_route = fields.get("access", [""])[0]
-            if (alignment not in ALIGNMENTS or crossing_type not in CROSSING_TYPES
-                    or access_route not in ACCESS_ROUTES):
-                return Response(400)
-            draft = Design(alignment, crossing_type, access_route)
-
-        anchor = "#spring-comparison"
-        notice = ""
+        receipt = group.receive_form(
+            fields.get("site", [""])[0], action, fields, session, views.LANGUAGES,
+        )
+        if receipt.status != 303:
+            return Response(receipt.status)
         language_cookie = None
-        if action == "language":
-            preferred = fields.get("language", [""])[0]
-            if preferred not in views.LANGUAGES:
-                return Response(400)
-            group.language = preferred
-            language_cookie = self.session_cookie("group_language", preferred, f"/join/{code}")
-            anchor = ""
-
+        if receipt.language_changed:
+            language_cookie = self.session_cookie("group_language", group.language, f"/join/{code}")
         join_path = student_join_path(session, language=group.language if session.swapped else None)
-        if action == "share":
-            comparison = group.rendered_comparisons.get(fields.get("comparison", [""])[0])
-            if comparison is None:
-                return Response(400)
-            session.share_comparison(comparison)
-            notice = "&notice=shared"
-            # A stale tab can send its captured maps without resetting newer controls.
-            if not current_site or fields.get("revision", [""])[0] != str(group.revision):
-                return self.redirect(f"{join_path}{notice}{anchor}")
-
-        # A language preference travels with the group. Design and view actions belong to the site.
-        if not current_site:
-            return self.redirect(f"{join_path}&notice=swapped#current-site", language_cookie)
-        if action == "design":
-            group.tested_design = draft
-            group.show_works = True
-            if fields.get("save") == ["1"] and not session.swapped:
-                group.saved_design = draft
-                notice = "&notice=saved"
-        elif action == "view":
-            view = fields.get("view", [""])[0]
-            if view not in {"proposed", "baseline", "replay", "reset"}:
-                return Response(400)
-            group.show_works = view != "baseline"
-            if view == "reset":
-                draft = group.tested_design = Design()
-                anchor = "#spring-investigation"
-            elif view == "replay":
-                notice = "&notice=replayed"
-        group.draft_design = draft
-        group.revision += 1
-        return self.redirect(f"{join_path}{notice}{anchor}", language_cookie)
+        notice = f"&notice={receipt.notice}" if receipt.notice else ""
+        return self.redirect(f"{join_path}{notice}{receipt.anchor}", language_cookie)
 
 
 def open_teacher_browser(server, *, initial=False):

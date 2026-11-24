@@ -7,12 +7,22 @@ from threading import Event, Lock
 from time import monotonic
 from typing import Optional
 
-from .investigation import Comparison, Design
+from .investigation import ACCESS_ROUTES, ALIGNMENTS, CROSSING_TYPES, Comparison, Design
 
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 CODE_LENGTH = 8
 SITES = ("A", "B")
+_DESIGN_FIELDS = {"alignment", "crossing_type", "access"}
+_VIEWS = {"proposed", "baseline", "replay", "reset"}
+
+
+@dataclass(frozen=True)
+class FormReceipt:
+    status: int
+    notice: str = ""
+    anchor: str = ""
+    language_changed: bool = False
 
 
 def record_comparison(collection, comparison):
@@ -71,6 +81,62 @@ class Group:
         self.draft_design = self.tested_design
         self.show_works = True
 
+    def receive_form(self, submitted_site, action, fields, session, languages):
+        """Apply a group form. A design or view counts only on this group's current site."""
+        current_site = submitted_site == self.site
+        draft = self.draft_design
+        if current_site and (action == "design" or fields.keys() & _DESIGN_FIELDS):
+            alignment = fields.get("alignment", [""])[0]
+            crossing_type = fields.get("crossing_type", [""])[0]
+            access_route = fields.get("access", [""])[0]
+            if (alignment not in ALIGNMENTS or crossing_type not in CROSSING_TYPES
+                    or access_route not in ACCESS_ROUTES):
+                return FormReceipt(400)
+            draft = Design(alignment, crossing_type, access_route)
+
+        language_changed = False
+        anchor = "#spring-comparison"
+        notice = ""
+        if action == "language":
+            preferred = fields.get("language", [""])[0]
+            if preferred not in languages:
+                return FormReceipt(400)
+            self.language = preferred
+            language_changed = True
+            anchor = ""
+
+        if action == "share":
+            comparison = self.rendered_comparisons.get(fields.get("comparison", [""])[0])
+            if comparison is None:
+                return FormReceipt(400)
+            session.share_comparison(comparison)
+            notice = "shared"
+            if not current_site or fields.get("revision", [""])[0] != str(self.revision):
+                return FormReceipt(303, notice, anchor, language_changed)
+
+        if not current_site:
+            return FormReceipt(303, "swapped", "#current-site", language_changed)
+
+        if action == "design":
+            self.tested_design = draft
+            self.show_works = True
+            if fields.get("save") == ["1"] and not session.swapped:
+                self.saved_design = draft
+                notice = "saved"
+        elif action == "view":
+            view = fields.get("view", [""])[0]
+            if view not in _VIEWS:
+                return FormReceipt(400)
+            self.show_works = view != "baseline"
+            if view == "reset":
+                draft = self.tested_design = Design()
+                anchor = "#spring-investigation"
+            elif view == "replay":
+                notice = "replayed"
+        self.draft_design = draft
+        self.revision += 1
+        return FormReceipt(303, notice, anchor, language_changed)
+
 
 @dataclass
 class ClassSession:
@@ -79,6 +145,7 @@ class ClassSession:
     language: str
     expires_at: float
     groups: dict = field(default_factory=dict)
+    browser_groups: dict = field(default_factory=dict, init=False, repr=False)
     swapped: bool = False
     comparisons: dict = field(default_factory=dict)
     swap_or_end: Event = field(default_factory=Event, init=False, repr=False, compare=False)
@@ -96,23 +163,35 @@ class ClassSession:
             if code not in active_codes:
                 return code
 
-    def take_site(self, site):
+    def take_site(self, site, *, browser_key=None):
+        assigned = self.group_token_for_browser(browser_key)
+        if assigned is not None:
+            return assigned
         if site not in SITES or site in self.occupied_sites():
             return None
         token = secrets.token_urlsafe(32)
         self.groups[token] = Group(site, self.language, self.new_rejoin_code())
+        if browser_key is not None:
+            self.browser_groups[browser_key] = token
         return token
+
+    def group_token_for_browser(self, browser_key):
+        return self.browser_groups.get(browser_key)
 
     def rejoin_code_for(self, starting_site):
         return next((g.rejoin_code for g in self.groups.values() if g.starting_site == starting_site), None)
 
-    def redeem_rejoin_code(self, entered_code):
+    def redeem_rejoin_code(self, entered_code, *, browser_key):
         code = entered_code.strip().upper().replace("-", "").replace(" ", "")
         if not code.isascii():
             return None
+        assigned = self.group_token_for_browser(browser_key)
         for token, group in self.groups.items():
+            if assigned is not None and token != assigned:
+                continue
             if secrets.compare_digest(group.rejoin_code.replace("-", ""), code):
                 group.rejoin_code = self.new_rejoin_code()
+                self.browser_groups[browser_key] = token
                 return token
         return None
 
