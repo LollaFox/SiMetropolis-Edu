@@ -33,6 +33,7 @@ ASSETS = {
     "/teacher.css": ("teacher.css", "text/css; charset=utf-8"),
     "/teacher-art.svg": ("teacher-art.svg", "image/svg+xml"),
     "/teacher-scene.js": ("teacher-scene.js", "text/javascript; charset=utf-8"),
+    "/teacher-sign-in.js": ("teacher-sign-in.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -392,9 +393,12 @@ class Handler(BaseHTTPRequestHandler):
                 return Response(403)
             return Response(204, headers=(("Set-Cookie", cookie),))
         if path == "/teacher/sign-in":
-            cookie = self.sign_in_teacher(fields.get("credential", [""])[0].strip())
+            credential = fields.get("credential", [""])[0]
+            if not credential:
+                return Response(400, teacher_views.sign_in(language, error="missing_credential"))
+            cookie = self.sign_in_teacher(credential.strip())
             if cookie is None:
-                return Response(401, teacher_views.sign_in(language, invalid=True))
+                return Response(401, teacher_views.sign_in(language, error="bad_credential"))
             return self.redirect(f"/teacher?lang={language}", cookie)
         if path == "/teacher/sign-out":
             self.classroom.sign_out(self.cookie_value(self.server.teacher_cookie_name))

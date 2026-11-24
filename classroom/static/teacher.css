@@ -142,6 +142,7 @@ h1:focus { outline: none; }
 .signin-form { display: grid; gap: 14px; }
 .signin-form label { font-size: clamp(1.25rem, 1.5vw, 1.625rem); font-weight: 600; }
 .signin-form input {
+  --focus: var(--teal);
   width: 100%;
   height: clamp(4rem, 4.6vw, 5rem);
   padding: 0 1.1rem;
