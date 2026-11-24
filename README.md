@@ -4,7 +4,7 @@
 
 ## Open the classroom on Mac
 
-Open Terminal in the project folder containing this README. With Python 3.9 or later installed, run:
+The launcher requires Python 3.9 or later. Open Terminal in the folder containing this README. For a checkout at `~/Documents/SiMetropolis Edu`, run `cd "$HOME/Documents/SiMetropolis Edu"` first. Start the classroom from that folder.
 
 ```sh
 sh classroom/mac_teacher.sh
@@ -16,10 +16,11 @@ The first run needs internet access and installs the classroom. Leave that Termi
 
 In the project folder, double-click **Open SiMetropolis Edu.cmd** or the existing **start-product.cmd** shortcut. Keep internet access on during first-use setup. If a transfer stops, reconnect and select **Retry**. Keep the launcher running during the lesson. Double-click the shortcut again to reopen the teacher tab.
 
-## Start a lesson
+## From teacher sign-in to the QR page
 
-1. In the teacher tab, select **A railway across Long Valley**, choose the starting language, and click **Start Lesson**. The 45-minute timer starts immediately.
-2. Select **Launch the QR code page**. Groups on the classroom network can scan the QR code, follow the link, or enter the short code on their own device.
+1. The launcher signs you in and opens **Choose a lesson** at `/teacher`. If you open that path manually while signed out, enter your teacher credential and select **Sign in**. If a class is already running, the teacher tab opens its live controls.
+2. Select **A railway across Long Valley**, choose the starting language, and click **Start Lesson**. The 45-minute timer starts immediately.
+3. On the live lesson page, select **Launch the QR code page**. A separate projector tab shows the QR code, join link, and short code for groups on the classroom network.
 
 If Edu detects a network problem, the teacher tab shows **Open network settings** and keeps retrying. Join information returns when the computer reconnects, and the original countdown continues.
 
