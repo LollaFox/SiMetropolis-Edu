@@ -14,8 +14,7 @@ ENTRY_DOCUMENTS = (
     "打开说明.txt",
     "classroom/README.md",
     "backend/README.md",
-    "docs/backend-v0.1.0-release/BACKEND_RELEASE_README.md",
-    "docs/底部数据看板与证据过滤说明_2026-10-16.md",
+    "docs/README.md",
     "sandbox/README.md",
 )
 SIMULATOR_LAUNCHES = (

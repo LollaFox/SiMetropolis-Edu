@@ -1,8 +1,8 @@
 # v0.1.0 — First internal backend release / 首个内部后端版本
 
-2026-10-16. Local source release; original frontend unchanged. The ZIP includes source, tests, examples, documentation and existing license notices. Credentials, runtime city saves and `.git` are excluded. The adjacent `RELEASE_MANIFEST.json` records the exact commit and ZIP checksum; `SHA256SUMS.txt` checks the ZIP and manifest.
+2026-10-16. Local source release; original frontend unchanged. The ZIP includes source, tests, examples, documentation and existing license notices. Credentials, runtime city saves and `.git` are excluded. The manifest records the exact source commit and ZIP checksum. The checksum file covers the ZIP and manifest. [Release manifest](https://github.com/LollaFox/SiMetropolis-Edu/blob/f4299ac5774f7436da4e663d09656ba36576ebf5/docs/backend-v0.1.0-release/RELEASE_MANIFEST.json) · [Checksums](https://github.com/LollaFox/SiMetropolis-Edu/blob/f4299ac5774f7436da4e663d09656ba36576ebf5/docs/backend-v0.1.0-release/SHA256SUMS.txt)
 
-本次为本地源码交付，前端代码未修改。包含源码、测试、示例、文档及原有许可声明；不包含密钥、运行存档或 `.git`。ZIP 旁的清单记录准确提交及校验值。
+本次为本地源码交付，前端代码未修改。包含源码、测试、示例、文档及原有许可声明；不包含密钥、运行存档或 `.git`。发布清单记录源码提交及 ZIP 校验值，校验文件涵盖 ZIP 和清单。[发布清单](https://github.com/LollaFox/SiMetropolis-Edu/blob/f4299ac5774f7436da4e663d09656ba36576ebf5/docs/backend-v0.1.0-release/RELEASE_MANIFEST.json) · [校验值](https://github.com/LollaFox/SiMetropolis-Edu/blob/f4299ac5774f7436da4e663d09656ba36576ebf5/docs/backend-v0.1.0-release/SHA256SUMS.txt)
 
 ## Included / 本次内容
 
