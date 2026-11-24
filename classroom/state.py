@@ -145,6 +145,7 @@ class ClassSession:
     language: str
     expires_at: float
     groups: dict = field(default_factory=dict)
+    browser_groups: dict = field(default_factory=dict, init=False, repr=False)
     swapped: bool = False
     comparisons: dict = field(default_factory=dict)
     swap_or_end: Event = field(default_factory=Event, init=False, repr=False, compare=False)
@@ -162,23 +163,35 @@ class ClassSession:
             if code not in active_codes:
                 return code
 
-    def take_site(self, site):
+    def take_site(self, site, *, browser_key=None):
+        assigned = self.group_token_for_browser(browser_key)
+        if assigned is not None:
+            return assigned
         if site not in SITES or site in self.occupied_sites():
             return None
         token = secrets.token_urlsafe(32)
         self.groups[token] = Group(site, self.language, self.new_rejoin_code())
+        if browser_key is not None:
+            self.browser_groups[browser_key] = token
         return token
+
+    def group_token_for_browser(self, browser_key):
+        return self.browser_groups.get(browser_key)
 
     def rejoin_code_for(self, starting_site):
         return next((g.rejoin_code for g in self.groups.values() if g.starting_site == starting_site), None)
 
-    def redeem_rejoin_code(self, entered_code):
+    def redeem_rejoin_code(self, entered_code, *, browser_key):
         code = entered_code.strip().upper().replace("-", "").replace(" ", "")
         if not code.isascii():
             return None
+        assigned = self.group_token_for_browser(browser_key)
         for token, group in self.groups.items():
+            if assigned is not None and token != assigned:
+                continue
             if secrets.compare_digest(group.rejoin_code.replace("-", ""), code):
                 group.rejoin_code = self.new_rejoin_code()
+                self.browser_groups[browser_key] = token
                 return token
         return None
 

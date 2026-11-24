@@ -69,6 +69,8 @@ COPY = {
     "choose": ("Choose Site {}", "選擇場地 {}"),
     "occupied": ("A group has taken this site.", "已有小組選擇這個場地。"),
     "choose_again": ("That site has been taken. Check which site is available.", "這個場地已有小組選擇。請查看哪些場地仍可選擇。"),
+    "join_check_error": ("Couldn’t check your site. Reload the join page and try again.",
+                         "無法確認你們的場地。請重新載入加入頁面再試。"),
     "help_rejoin": ("Help a group rejoin", "協助小組重新加入"),
     "starting_site": ("Group’s starting site", "小組的起始場地"),
     "site_name": ("Site {}", "場地 {}"),
@@ -389,6 +391,7 @@ def choose_site(session, taken=False, invalid_rejoin=False):
   <p>{t["rejoin_help"]}</p>
   {error}
   <form action="/join/{session.code}/rejoin?lang={language}" method="post">
+    <input type="hidden" name="browser_key">
     <label for="rejoin-code">{t["rejoin_code"]}</label>
     <input id="rejoin-code" name="rejoin_code" autocapitalize="characters" spellcheck="false" autocomplete="off" required>
     <button>{t["rejoin"]}</button>
@@ -404,17 +407,21 @@ def choose_site(session, taken=False, invalid_rejoin=False):
   <button name="site" value="{site}"{disabled}>{t["choose"].format(site)}</button>
   {occupancy}
 </section>""")
-    return page(language, t["choose_site"], f"""
-<section class="panel">
+    return page(language, t["join_title"], f"""
+<p class="panel" role="status" data-join-check>{t["checking_site"]}</p>
+<p class="panel alert" role="alert" data-join-check-error hidden>{t["join_check_error"]}</p>
+<section class="panel" data-join-chooser data-resume-path="/join/{session.code}/resume?lang={language}" hidden>
   <h1>{t["choose_site"]}</h1>
   <p>{t["choose_help"]}</p>
   <p class="site-note">{t["imagined"]}</p>
   {alert}
   <form class="site-choices" action="/join/{session.code}/take-site?lang={language}" method="post">
+    <input type="hidden" name="browser_key">
     {''.join(cards)}
   </form>
   {rejoin}
-</section>""", layout="wide", session=session)
+</section>
+<script src="/join-group.js" defer></script>""", layout="wide", session=session)
 
 
 def group_opening(session, group, *, swap_wait_seconds, notice=""):

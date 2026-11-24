@@ -1,6 +1,7 @@
 async function openTeacherView() {
   const ticket = window.location.hash.slice(1);
-  const teacherView = document.documentElement.lang === 'en' ? '/teacher' : '/teacher?lang=zh-Hant';
+  const language = document.documentElement.lang;
+  const teacherView = language === 'en' ? '/teacher' : `/teacher?lang=${language}`;
   if (!ticket) {
     window.location.replace(teacherView);
     return;
