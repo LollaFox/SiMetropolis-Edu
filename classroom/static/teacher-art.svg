@@ -84,20 +84,25 @@
     </symbol>
 
     <symbol id="g-lights" viewBox="0 0 120 90">
-      <rect width="120" height="90" fill="#dcebe6"/>
-      <path d="M0 52h120v38H0z" fill="#a8cf78"/>
-      <path d="M0 64h120v10H0z" fill="#8ebd68"/>
-      <ellipse cx="34" cy="40" rx="22" ry="14" fill="#5f9a47"/>
-      <ellipse cx="24" cy="38" rx="5" ry="3.2" fill="#f4e9d6"/>
-      <ellipse cx="36" cy="34" rx="5" ry="3.2" fill="#f4e9d6"/>
-      <ellipse cx="46" cy="40" rx="5" ry="3.2" fill="#f4e9d6"/>
-      <path d="M28 36.5l3.5-.5M40 32.5l3.5-.5" stroke="#f2b33d" stroke-width="1.5" stroke-linecap="round"/>
-      <path d="M0 68h56" stroke="#4d585c" stroke-width="7" stroke-linecap="round"/>
-      <path d="M64 68h56" stroke="#f6d566" stroke-width="7" stroke-linecap="round"/>
-      <path d="M6 68h46" stroke="#dcebe6" stroke-width="1.6" stroke-dasharray="4 4" stroke-linecap="round"/>
-      <path d="M96 68V28" stroke="#12312d" stroke-width="3" stroke-linecap="round"/>
-      <path d="M84 26h24v6H84z" fill="#f6d566"/>
-      <path d="M96 32 80 68h32z" fill="#f6d566" fill-opacity=".45"/>
+      <rect width="120" height="90" fill="#1c3947"/>
+      <path d="M0 63c28-7 54 3 82-1l38-5v33H0z" fill="#2e534e"/>
+      <path d="M0 73h120" stroke="#53676b" stroke-width="12"/>
+      <path d="M89 30h13l18 37v12H57l8-12z" fill="#f6d566" fill-opacity=".42"/>
+      <path d="M65 67h55v12H57z" fill="#f6d566"/>
+
+      <path d="M8 63V18M8 44c20 11 45 7 69 3" fill="none" stroke="#101f2a" stroke-width="6" stroke-linecap="round"/>
+      <path d="M11 45c19 10 43 6 66 2" fill="none" stroke="#a48459" stroke-width="3" stroke-linecap="round"/>
+
+      <path d="M30 44v7m6-7v7m24-9v7m6-8v7" stroke="#ecad58" stroke-width="2" stroke-linecap="round"/>
+      <path d="M17 46l8-10c2-3 4-3 7-3v-2a6 6 0 0 1 12 0v4c0 10-8 14-18 11l-7 3z" fill="#d0ebe5"/>
+      <path d="M48 44l7-8c1-2 4-4 7-4v-2a5.5 5.5 0 0 1 11 0v4c0 10-8 13-17 10l-6 2z" fill="#f6e5b3"/>
+      <path d="M44 30l6 2-6 3zm29-1 6 2-6 3z" fill="#ecad58"/>
+      <path d="M26 40c4 1 8 0 11-3m19 3c4 1 8 0 11-3" fill="none" stroke="#788e88" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="40.5" cy="30.5" r="1.25" fill="#101f2a"/>
+      <circle cx="69.5" cy="29.5" r="1.25" fill="#101f2a"/>
+
+      <path d="M107 75V26H92" fill="none" stroke="#101f2a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="86" y="24" width="19" height="7" rx="3" fill="#ffe798"/>
     </symbol>
   </defs>
 </svg>

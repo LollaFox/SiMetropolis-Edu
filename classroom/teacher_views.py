@@ -202,11 +202,20 @@ def lesson_list(language, session):
         note = t["preview"]
         if lesson_id == CLASSROOM_LESSON:
             note = t["started"] if session else ""
-        caption = f'<small>{note}</small>' if note else ""
-        cards.append(f"""<li class="lesson">
-          {artwork(f"g-{lesson_id}", "glyph", "0 0 120 90")}
-          <a class="lesson-title" id="lesson-{lesson_id}" href="/teacher/lessons/{lesson_id}?lang={language}">{title}{caption}</a>
-          {CHEVRON}
+        title_id = f"lesson-title-{lesson_id}"
+        note_id = f"lesson-note-{lesson_id}"
+        caption = f'<small id="{note_id}">{note}</small>' if note else ""
+        description = f' aria-describedby="{note_id}"' if note else ""
+        cards.append(f"""<li>
+          <a class="lesson" id="lesson-{lesson_id}" href="/teacher/lessons/{lesson_id}?lang={language}"
+             aria-labelledby="{title_id}"{description}>
+            {artwork(f"g-{lesson_id}", "glyph", "0 0 120 90")}
+            <span class="lesson-copy">
+              <span class="lesson-title" id="{title_id}">{title}</span>
+              {caption}
+            </span>
+            {CHEVRON}
+          </a>
         </li>""")
     status_url = f"/teacher/project/{session.code}/status" if session else ""
     return workspace(language, t["choose_lesson"], "list", "/teacher/lessons", f"""

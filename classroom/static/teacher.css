@@ -248,11 +248,11 @@ body[data-screen="started"] .bar .brand .edu { color: #8fd49a; }
   padding: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: clamp(96px, calc((100vh - 270px) / 3), 240px);
+  grid-auto-rows: minmax(clamp(96px, calc((100vh - 270px) / 3), 240px), auto);
   gap: clamp(12px, 1.8vh, 22px) clamp(16px, 1.6vw, 28px);
 }
+.lessons > li { display: grid; min-width: 0; }
 .lesson {
-  position: relative;
   display: flex;
   align-items: center;
   gap: clamp(14px, 1.25vw, 24px);
@@ -260,28 +260,27 @@ body[data-screen="started"] .bar .brand .edu { color: #8fd49a; }
   background: var(--card);
   border: 2px solid var(--line);
   border-radius: 20px;
+  color: var(--ink);
+  text-decoration: none;
   transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 .lesson:hover { border-color: var(--ink); background: var(--card-hover); box-shadow: 0 5px 0 rgba(18, 49, 45, .1); }
 .lesson .glyph { height: clamp(64px, 11vh, 124px); width: auto; aspect-ratio: 4 / 3; flex: none; border-radius: 12px; display: block; }
-.lesson-title {
+.lesson-copy {
   flex: 1;
   min-width: 0;
-  border: 0;
-  background: none;
-  padding: 0;
+  overflow-wrap: anywhere;
+}
+.lesson-title {
+  display: block;
   text-align: start;
-  color: var(--ink);
   font-size: clamp(1.625rem, 2.2vw, 2.2rem);
   line-height: 1.18;
   text-wrap: balance;
 }
 :lang(en) .lesson-title { font-weight: 700; letter-spacing: -0.012em; }
 :lang(zh-Hant) .lesson-title { font-weight: 600; letter-spacing: 0.04em; line-height: 1.3; }
-.lesson-title::after { content: ""; position: absolute; inset: -2px; border-radius: 20px; }
-.lesson-title:focus-visible { outline: none; }
-.lesson-title:focus-visible::after { outline: 4px solid var(--focus); outline-offset: 2px; }
-.lesson:hover .lesson-title, .lesson-title:focus-visible {
+.lesson:hover .lesson-title, .lesson:focus-visible .lesson-title {
   text-decoration: underline;
   text-decoration-color: var(--teal);
   text-decoration-thickness: 0.09em;
@@ -361,15 +360,15 @@ body[data-screen="started"] .bar .brand .edu { color: #8fd49a; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-.lang a, .lesson-title { text-decoration: none; }
-.lesson-title small, .preview-note {
+.lang a { text-decoration: none; }
+.lesson-copy small, .preview-note {
   display: block;
-  margin-top: .5em;
   color: var(--muted);
-  font-size: 1rem;
+  font-size: 1.125rem;
   font-weight: 500;
   letter-spacing: normal;
 }
+.lesson-copy small { margin-block-start: .3em; }
 .back .chev { transform: rotate(180deg); }
 .start-form, .rejoin { display: grid; justify-items: start; gap: 1rem; }
 .start-form label, .class-tools label {
