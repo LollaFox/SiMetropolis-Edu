@@ -205,7 +205,7 @@ def lesson_list(language, session):
         caption = f'<small>{note}</small>' if note else ""
         cards.append(f"""<li class="lesson">
           {artwork(f"g-{lesson_id}", "glyph", "0 0 120 90")}
-          <a class="lesson-title" href="/teacher/lessons/{lesson_id}?lang={language}">{title}{caption}</a>
+          <a class="lesson-title" id="lesson-{lesson_id}" href="/teacher/lessons/{lesson_id}?lang={language}">{title}{caption}</a>
           {CHEVRON}
         </li>""")
     status_url = f"/teacher/project/{session.code}/status" if session else ""
@@ -219,8 +219,9 @@ def lesson_list(language, session):
 </section>""", t, status_url=status_url)
 
 
-def all_lessons(language, t):
-    return f'<a class="btn btn-quiet back" href="/teacher/lessons?lang={language}">{CHEVRON}{t["all_lessons"]}</a>'
+def all_lessons(language, t, lesson_id):
+    return (f'<a class="btn btn-quiet back" href="/teacher/lessons?lang={language}#lesson-{lesson_id}">'
+            f'{CHEVRON}{t["all_lessons"]}</a>')
 
 
 def lesson_detail(lesson_id, lesson, t, slot, actions, controls=""):
@@ -256,7 +257,7 @@ def lesson_review(language, lesson_id):
             {t["start"]}
           </button>
         </form>"""
-    content = lesson_detail(lesson_id, lesson, t, all_lessons(language, t), action)
+    content = lesson_detail(lesson_id, lesson, t, all_lessons(language, t, lesson_id), action)
     return workspace(language, lesson["title"], "review", f"/teacher/lessons/{lesson_id}", content, t)
 
 
@@ -287,7 +288,7 @@ def live_lesson(language, session, *, notice, track_network, local_settings):
     actions = f"""{network_notice(t, action=settings) if track_network else ""}
       <a class="btn btn-primary btn-start" data-network-ready{' hidden' if track_network else ''}
         href="{projection}" target="_blank" rel="noopener">{t["launch_qr"]}</a>
-      {all_lessons(language, t)}"""
+      {all_lessons(language, t, CLASSROOM_LESSON)}"""
     controls = f"""<div class="class-tools">
       <div>{pass_the_city_controls(session, language, t, notice)}</div>
       <div>
