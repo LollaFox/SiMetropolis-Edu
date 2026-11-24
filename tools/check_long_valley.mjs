@@ -241,6 +241,126 @@ function railwayLesson(page) {
   return page.getByRole('link', { name: /A railway across Long Valley|穿越塱原的鐵路/ });
 }
 
+const signInLanguages = [
+  {
+    lang: 'en', language: 'English', label: 'Teacher credential', submit: 'Sign in',
+    missing: 'Enter your teacher credential', rejected: 'Check your teacher credential and try again.',
+    catalogue: 'Long Valley',
+  },
+  {
+    lang: 'zh-Hant', language: '繁體中文', label: '教師憑證', submit: '登入',
+    missing: '請輸入教師憑證。', rejected: '請檢查教師憑證，然後再試一次。',
+    catalogue: '塱原',
+  },
+];
+
+test('teacher sign-in distinguishes keyboard focus from an empty submission in both languages', async t => {
+  const { browser, origin } = await classroom(t);
+  const teacher = await participant(browser);
+  for (const { lang, label, submit, missing } of signInLanguages) {
+    await teacher.goto(`${origin}/teacher?lang=${lang}`);
+    const password = teacher.getByLabel(label, { exact: true });
+    assert.ok(await password.evaluate(field => field === document.activeElement));
+    assert.notEqual(await password.getAttribute('aria-invalid'), 'true');
+    const readyOutline = await password.evaluate(field => {
+      const { outlineColor, outlineStyle, outlineWidth } = getComputedStyle(field);
+      return { outlineColor, outlineStyle, outlineWidth };
+    });
+    assert.notEqual(readyOutline.outlineStyle, 'none');
+    assert.ok(parseFloat(readyOutline.outlineWidth) >= 2);
+
+    await teacher.getByRole('button', { name: submit, exact: true }).click();
+    const error = teacher.getByRole('alert').filter({ hasText: missing });
+    await error.waitFor();
+    assert.equal(await password.getAttribute('aria-invalid'), 'true');
+    assert.equal(await password.getAttribute('aria-describedby'), await error.getAttribute('id'));
+    assert.notEqual(await password.evaluate(field => getComputedStyle(field).borderTopColor), readyOutline.outlineColor);
+  }
+});
+
+test('teacher sign-in accepts a corrected masked credential in both languages', async t => {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const credential = issueCredential();
+  for (const { lang, label, submit, rejected, catalogue } of signInLanguages) {
+    const teacher = await participant(browser);
+    await teacher.goto(`${origin}/teacher?lang=${lang}`);
+    const password = teacher.getByLabel(label, { exact: true });
+    const error = teacher.getByRole('alert').filter({ hasText: rejected });
+    for (const invalid of [' ', 'invalid']) {
+      await password.fill(invalid);
+      const [response] = await Promise.all([
+        teacher.waitForResponse(response => new URL(response.url()).pathname === '/teacher/sign-in'),
+        teacher.getByRole('button', { name: submit, exact: true }).click(),
+      ]);
+      assert.equal(response.status(), 401);
+      await error.waitFor();
+      assert.equal(await password.getAttribute('aria-invalid'), 'true');
+      assert.equal(await password.getAttribute('aria-describedby'), await error.getAttribute('id'));
+    }
+
+    await password.fill(` ${credential} x`);
+    await password.press('Backspace');
+    assert.equal(await password.getAttribute('type'), 'password');
+    assert.equal(await error.isVisible(), false);
+    assert.notEqual(await password.getAttribute('aria-invalid'), 'true');
+    await password.press('Enter');
+    await teacher.getByRole('heading', { name: catalogue, exact: true }).waitFor();
+    assert.equal(await teacher.getByRole('listitem').count(), 6);
+  }
+});
+
+test('teacher sign-in reloads in the selected language', async t => {
+  const { browser, origin } = await classroom(t);
+  const teacher = await participant(browser);
+  for (const target of signInLanguages) {
+    const source = signInLanguages.find(copy => copy.lang !== target.lang);
+    for (const submitEmpty of [false, true]) {
+      await teacher.goto(`${origin}/teacher?lang=${source.lang}`);
+      if (submitEmpty) {
+        await teacher.getByRole('button', { name: source.submit, exact: true }).click();
+        await teacher.getByRole('alert').filter({ hasText: source.missing }).waitFor();
+      }
+      await teacher.getByRole('link', { name: target.language, exact: true }).click();
+      await teacher.reload();
+      assert.equal(await teacher.locator('html').getAttribute('lang'), target.lang);
+      assert.equal(teacher.url(), `${origin}/teacher?lang=${target.lang}`);
+      await teacher.getByLabel(target.label, { exact: true }).waitFor();
+    }
+  }
+});
+
+test('teacher sign-in keeps the masked draft when switching to either language', async t => {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const credential = issueCredential();
+  const draft = `${credential}x`;
+  for (const target of signInLanguages) {
+    const source = signInLanguages.find(({ lang }) => lang !== target.lang);
+    const teacher = await participant(browser);
+    await teacher.goto(`${origin}/teacher?lang=${source.lang}`);
+    const entry = teacher.getByLabel(source.label, { exact: true });
+    await entry.fill(draft);
+    assert.equal(await entry.getAttribute('type'), 'password');
+
+    const language = teacher.getByRole('link', { name: target.language, exact: true });
+    await language.press('Enter');
+    const password = teacher.getByLabel(target.label, { exact: true });
+    assert.ok(await password.inputValue() === draft, 'The draft survives the language switch');
+    assert.equal(await password.getAttribute('type'), 'password');
+    assert.equal(await language.getAttribute('aria-current'), 'true');
+    assert.ok(!(await teacher.content()).includes(credential), 'The page markup omits the credential');
+    assert.ok(!teacher.url().includes(credential), 'The navigation URL omits the credential');
+    const storage = await teacher.context().storageState({ indexedDB: true });
+    assert.ok(!JSON.stringify(storage).includes(credential), 'Persistent storage omits the credential');
+    assert.ok(await teacher.evaluate(secret => !JSON.stringify(sessionStorage).includes(secret), credential));
+
+    await password.press('End');
+    await password.press('Backspace');
+    await teacher.getByRole('button', { name: target.submit, exact: true }).click();
+    await teacher.getByRole('heading', { name: target.catalogue, exact: true }).waitFor();
+    assert.equal(await teacher.getByRole('listitem').count(), 6);
+  }
+});
+
 test('a lesson tile opens its review from the artwork and announces availability separately', async t => {
   const { browser, issueCredential, origin } = await classroom(t);
   const teacher = await participant(browser);
@@ -454,6 +574,104 @@ test('teacher sign-in opens the lesson catalogue and only the railway lesson can
   await teacher.getByRole('button', { name: 'Sign out' }).click();
   await password.waitFor();
 });
+
+const lessonNavigationCopy = [
+  {
+    lang: 'en', language: 'English', credential: 'Teacher credential', back: 'All lessons',
+    sixth: 'Lights above the night roost', summary: 'the path in the dark with the path lit',
+    fifth: 'Drains across the fields', railway: 'A railway across Long Valley',
+    road: 'A road along the old bund', preview: 'Preview only', start: 'Start Lesson',
+    started: 'Lesson started', join: 'Join the Long Valley class',
+  },
+  {
+    lang: 'zh-Hant', language: '繁體中文', credential: '教師憑證', back: '所有課節',
+    sixth: '夜棲地上方的燈光', summary: '黑暗中的小徑與亮燈後的小徑',
+    fifth: '穿過農田的排水渠', railway: '穿越塱原的鐵路',
+    road: '沿舊堤的道路', preview: '僅供預覽', start: '開始課節',
+    started: '課節已開始', join: '加入塱原課堂',
+  },
+];
+
+async function activateWithKeyboard(page, link) {
+  for (let step = 0; step < 12; step++) {
+    if (await link.evaluate(element => element === document.activeElement)) {
+      await page.keyboard.press('Enter');
+      return;
+    }
+    await page.keyboard.press('Tab');
+  }
+  assert.fail('Cannot reach the link with Tab: ' + await link.innerText());
+}
+
+for (const source of lessonNavigationCopy) {
+  const target = lessonNavigationCopy.find(copy => copy !== source);
+
+  test(`All lessons returns keyboard focus after switching from ${source.language} to ${target.language}`, async t => {
+    const { browser, issueCredential, origin } = await classroom(t);
+    const teacher = await participant(browser);
+    await teacher.goto(`${origin}/teacher?lang=${source.lang}`);
+    const credential = teacher.getByLabel(source.credential);
+    await credential.fill(issueCredential());
+    await credential.press('Enter');
+
+    const link = name => teacher.getByRole('link', { name });
+    await activateWithKeyboard(teacher, link(source.sixth));
+    for (const copy of [source, target]) {
+      if (copy === target) await activateWithKeyboard(teacher, link(target.language));
+      await teacher.getByRole('heading', { name: copy.sixth, exact: true }).waitFor();
+      await teacher.getByText(copy.summary).waitFor();
+      await teacher.getByText(copy.preview, { exact: true }).waitFor();
+    }
+    await activateWithKeyboard(teacher, link(target.back));
+    const reviewed = link(target.sixth);
+    await reviewed.waitFor();
+    assert.ok(await reviewed.evaluate(el => el === document.activeElement), 'Focus returns to the sixth lesson');
+    await teacher.keyboard.press('Shift+Tab');
+    assert.ok(await link(target.fifth).evaluate(el => el === document.activeElement),
+      'Keyboard browsing continues at the adjacent lesson');
+  });
+
+  test(`Browsing in ${target.language} preserves the running ${source.language} railway class`, async t => {
+    const { browser, issueCredential, origin } = await classroom(t);
+    const teacher = await participant(browser);
+    await prepareClass(teacher, origin, issueCredential(), source.language);
+    const beforeStart = performance.now();
+    await teacher.getByRole('button', { name: source.start }).click();
+    await teacher.getByRole('status').getByText(source.started).waitFor();
+    const afterStart = performance.now();
+    const projection = await openProjection(teacher);
+    const classCode = await projection.locator('code').innerText();
+
+    await teacher.getByRole('link', { name: source.back }).click();
+    const railway = railwayLesson(teacher);
+    await railway.waitFor();
+    assert.ok(await railway.evaluate(el => el === document.activeElement));
+    await teacher.getByRole('link', { name: source.road }).click();
+    await teacher.getByRole('link', { name: target.language }).click();
+    await teacher.getByRole('heading', { name: target.road }).waitFor();
+    await teacher.getByText(target.preview, { exact: true }).waitFor();
+    // Let two countdown ticks elapse while the teacher is reading the preview.
+    await delay(2100);
+    await teacher.getByRole('link', { name: target.back }).click();
+    await railway.getByText(target.started).waitFor();
+    await railway.click();
+    await teacher.getByRole('heading', { name: target.railway }).waitFor();
+    await teacher.getByRole('status').getByText(target.started).waitFor();
+    assert.equal(await teacher.getByRole('button', { name: target.start }).count(), 0);
+
+    const beforeRead = performance.now();
+    const timer = await teacher.getByRole('timer').innerText();
+    const [minutes, seconds] = timer.split(':').map(Number);
+    const elapsedTicks = 45 * 60 - (minutes * 60 + seconds);
+    assert.ok(elapsedTicks >= Math.floor((beforeRead - afterStart) / 1000) &&
+      elapsedTicks <= Math.ceil((performance.now() - beforeStart) / 1000),
+      `The countdown must include the time spent browsing (displayed ${timer})`);
+    const reopened = await openProjection(teacher);
+    assert.equal(reopened.url(), projection.url());
+    assert.equal(await reopened.locator('code').innerText(), classCode);
+    await reopened.getByRole('heading', { name: source.join }).waitFor();
+  });
+}
 
 async function openClass(page, origin, credential, language = 'English') {
   await prepareClass(page, origin, credential, language);
