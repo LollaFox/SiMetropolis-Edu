@@ -18,7 +18,7 @@ import webbrowser
 import qrcode
 from qrcode.image.pure import PyPNGImage
 
-from . import views
+from . import teacher_views, views
 from .network import ClassroomLan, format_origin, has_network_settings, open_network_settings
 from .state import Classroom, ClassSession, SITES
 
@@ -30,6 +30,9 @@ ASSETS = {
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
     "/join-group.js": ("join-group.js", "text/javascript; charset=utf-8"),
     "/teacher-launch.js": ("teacher-launch.js", "text/javascript; charset=utf-8"),
+    "/teacher.css": ("teacher.css", "text/css; charset=utf-8"),
+    "/teacher-art.svg": ("teacher-art.svg", "image/svg+xml"),
+    "/teacher-scene.js": ("teacher-scene.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -232,17 +235,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             return Response(200, views.home(language))
         if path == "/teacher/launch" and self.is_local_teacher_launch():
-            return Response(200, views.teacher_launch(language))
-        if path == "/teacher":
+            return Response(200, teacher_views.sign_in(language, launching=True))
+        if path in ("/teacher", "/teacher/lessons") or path.startswith("/teacher/lessons/"):
             teacher = self.teacher_id()
             if teacher is None:
-                return Response(200, views.sign_in(language))
+                return Response(200, teacher_views.sign_in(language))
             session = self.classroom.class_for_teacher(teacher)
-            notice = fields.get("notice", [""])[0]
-            if session is None:
-                return Response(200, views.teacher(language))
-            return Response(200, views.teacher(
-                session.language, session, notice=notice, track_network=self.server.lan is not None,
+            if session and "lang" not in fields:
+                language = session.language
+            if path.startswith("/teacher/lessons/"):
+                lesson = path.removeprefix("/teacher/lessons/")
+                if lesson not in teacher_views.LESSONS:
+                    return Response(404)
+                if session and lesson == teacher_views.CLASSROOM_LESSON:
+                    return self.redirect(f"/teacher?lang={language}")
+                return Response(200, teacher_views.lesson_review(language, lesson))
+            if path == "/teacher/lessons" or session is None:
+                return Response(200, teacher_views.lesson_list(language, session))
+            return Response(200, teacher_views.live_lesson(
+                language, session, notice=fields.get("notice", [""])[0], track_network=self.server.lan is not None,
                 local_settings=self.can_open_network_settings(),
             ))
         if path == "/join":
@@ -290,7 +301,8 @@ class Handler(BaseHTTPRequestHandler):
             site = fields.get("site", [""])[0]
             if site not in SITES:
                 return Response(400)
-            return Response(200, views.teacher_rejoin(session, site))
+            language = language if "lang" in fields else session.language
+            return Response(200, teacher_views.teacher_rejoin(language, session, site))
         return Response(404, views.unavailable(language))
 
     def teacher_projection(self, code, detail, language, join_origin, fields):
@@ -382,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/teacher/sign-in":
             cookie = self.sign_in_teacher(fields.get("credential", [""])[0].strip())
             if cookie is None:
-                return Response(401, views.sign_in(language, invalid=True))
+                return Response(401, teacher_views.sign_in(language, invalid=True))
             return self.redirect(f"/teacher?lang={language}", cookie)
         if path == "/teacher/sign-out":
             self.classroom.sign_out(self.cookie_value(self.server.teacher_cookie_name))
@@ -394,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
             if teacher is None:
                 return Response(403)
             if opening_language not in views.LANGUAGES:
+                return Response(400)
+            if fields.get("lesson", [teacher_views.CLASSROOM_LESSON]) != [teacher_views.CLASSROOM_LESSON]:
                 return Response(400)
             self.classroom.start(teacher, opening_language)
             if self.server.lan is not None:

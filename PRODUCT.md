@@ -23,7 +23,7 @@ The lesson combines two controlled comparisons. Groups compare the same spring s
 
 - The teacher runs the classroom service on a Mac or Windows computer and teaches in the browser. The private teacher view controls the session. A separate projection view shows joining details or selected comparisons.
 - Groups join from a browser on the classroom network by QR code, link, or short code. Site A has a central wetland. Site B has a wetland closer to the river. One group starts at each site.
-- **Start class** starts the countdown immediately. If the classroom network drops, Edu withholds joining details and retries while the countdown continues. Reopening the teacher view while the service is running preserves the class. If a group loses access to its work, the teacher can issue a one-use rejoin code for the group's starting site.
+- **Start Lesson** starts the countdown immediately. If the classroom network drops, Edu withholds joining details and retries while the countdown continues. Reopening the teacher view while the service is running preserves the class. If a group loses access to its work, the teacher can issue a one-use rejoin code for the group's starting site.
 - The Long Valley classroom is the product focus. The broader Northern Metropolis simulator is retained in the repository as source reference.
 
 ## Capabilities and Constraints

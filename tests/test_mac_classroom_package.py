@@ -165,7 +165,7 @@ class MacClassroomPackageTests(unittest.TestCase):
     def assert_lesson_preparation(self, browser_url):
         browser, origin = self.open_teacher_link(browser_url)
         with browser.open(origin + "/teacher", timeout=5) as response:
-            self.assertIn(b"Start class", response.read())
+            self.assertIn(b"Choose a lesson", response.read())
         return browser, origin
 
 

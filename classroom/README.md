@@ -2,7 +2,7 @@
 
 Follow the [Mac Terminal or Windows shortcut instructions](../README.md) to open the classroom from the project folder.
 
-The default browser opens lesson preparation. Choose English or 繁體中文, then click **Start class** when you are ready. On the classroom network, select **Project join information** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
+The default browser opens lesson preparation. Select **A railway across Long Valley**, choose the starting language, then click **Start Lesson** when you are ready. On the classroom network, select **Launch the QR code page** to show groups the QR code, link, and short code. Keep the launcher window open while using the classroom.
 
 If Edu loses the classroom network or you start while disconnected, the timer keeps running. Select **Open network settings** if you need to reconnect the computer. Edu retries automatically and restores the join information for the same class when it finds a usable address.
 
@@ -45,7 +45,7 @@ python -B -m classroom issue-teacher-credential
 python -B -m classroom serve
 ```
 
-Save the printed teacher credential privately. Open [the teacher view](http://127.0.0.1:8899/teacher), sign in, and choose the opening language. Start a class, open **Project join information** in the same signed-in browser, and show that tab on the projector. Two neighbouring groups can use the displayed link, QR code, or short code to take one starting site each. Each group shares one device and can switch languages after choosing its site.
+Save the printed teacher credential privately. Open [the teacher view](http://127.0.0.1:8899/teacher), sign in, and select **A railway across Long Valley**. Choose the opening language, click **Start Lesson**, open **Launch the QR code page** in the same signed-in browser, and show that tab on the projector. Two neighbouring groups can use the displayed link, QR code, or short code to take one starting site each. Each group shares one device and can switch languages after choosing its site.
 
 Groups choose an alignment, crossing type, and construction access route, then select **Test crossing**. The spring map compares the same site with and without the proposed works. Select a striped area on the map to see which work overlaps modelled nesting habitat there. Keyboard users can tab to the area and press Enter. **Possible disturbance** lists all findings for the crossing.
 
@@ -57,7 +57,7 @@ Each group can select **Save for swap** to keep the crossing it wants to try at 
 
 Connected group screens switch as soon as they receive the teacher’s swap. If a device loses its connection or resumes from the background while showing its starting site, it hides that map until the classroom confirms the current site.
 
-The 45-minute countdown starts when you select **Start class**. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
+The 45-minute countdown starts when you select **Start Lesson**. **End class** closes it early, and the same credential opens the next class. Credential hashes are stored in `classroom/.data/teachers`. A server restart closes the current class. For a different storage location, pass the same `--data-dir` before both subcommands.
 
 ## Group devices
 

@@ -3,7 +3,6 @@
 from base64 import b64encode
 from hashlib import sha256
 from html import escape
-from math import ceil
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
@@ -21,42 +20,17 @@ COPY = {
     "name": ("Long Valley classroom", "塱原課堂"),
     "student_entry": ("Join as a group", "以小組身分加入"),
     "teacher_entry": ("Teacher view", "教師介面"),
-    "credential": ("Teacher credential", "教師憑證"),
-    "sign_in": ("Sign in", "登入"),
-    "bad_credential": ("Check your teacher credential and try again.", "請檢查教師憑證，然後再試一次。"),
-    "launch_wait": ("Opening the teacher view…", "正在開啟教師介面⋯"),
-    "launch_renewed": ("Your sign-in link expired. Continue in the new teacher tab. "
-                       "If no tab opens, double-click Open SiMetropolis Edu again.",
-                       "登入連結已逾時。請到新開啟的教師分頁繼續。如果沒有新分頁，請再次按兩下 Open SiMetropolis Edu。"),
-    "launch_error": ("Open SiMetropolis Edu again to reach the teacher view.", "請重新開啟 SiMetropolis Edu，以進入教師介面。"),
-    "start_title": ("Open a Long Valley class", "開啟塱原課堂"),
-    "start_help": ("Choose the language groups see when they join.", "選擇小組加入時使用的語言。"),
-    "starting_language": ("Starting language", "起始語言"),
-    "start": ("Start class", "開始課堂"),
-    "open": ("Your class is open", "課堂已開啟"),
-    "time_remaining": ("Time remaining", "剩餘時間"),
     "project": ("Project join information", "投影加入資訊"),
-    "project_help": ("Open the join information in this browser and show that tab on the projector.", "請在此瀏覽器開啟加入資訊，並將該分頁投影給小組。"),
     "network_problem": ("The classroom network is unavailable. Edu is retrying automatically.",
                         "無法連接課堂網絡。Edu 正在自動重試。"),
-    "network_settings": ("Open network settings", "開啟網絡設定"),
-    "network_settings_error": ("Edu couldn’t open network settings. Open them from your computer’s settings menu.",
-                               "Edu 無法開啟網絡設定。請從電腦的設定選單開啟。"),
     "shared_comparisons": ("Shared comparisons", "已分享的比較結果"),
     "select_comparison": ("Choose a comparison to show on the projector.", "選擇要投影的比較結果。"),
     "no_comparisons": ("No group has shared a comparison yet.", "暫時沒有小組分享比較結果。"),
     "back_to_comparisons": ("Back to shared comparisons", "返回已分享的比較結果"),
     "spring_construction": ("Spring · Construction", "春季 · 施工階段"),
-    "pass_the_city": ("Pass the City", "交換場地"),
-    "pass_help": ("Ask both groups to save a crossing, then send them to their partner sites.",
-                  "請兩組各自儲存走線，然後讓兩組交換場地。"),
-    "pass_waiting": ("Both groups need to join before you can swap sites.", "兩組都加入課堂後，便可交換場地。"),
-    "pass_done": ("Both groups have moved to their partner sites.", "兩組已到達對方的場地。"),
     "partner_site": ("You’re at your partner site. Try your crossing here.", "你們已到達對方的場地。試試你們的走線吧。"),
     "checking_site": ("Checking your current site…", "正在確認你們的場地⋯"),
     "opening_partner": ("Opening your partner site…", "正在開啟對方的場地⋯"),
-    "end": ("End class", "結束課堂"),
-    "sign_out": ("Sign out", "登出"),
     "join_title": ("Join the Long Valley class", "加入塱原課堂"),
     "join_help": ("Use one device per group. Scan the QR code, open the link, or enter the join code.", "每組共用一部裝置。掃描二維碼、開啟連結，或輸入課堂代碼。"),
     "qr": ("Join QR code", "加入課堂的二維碼"),
@@ -71,15 +45,7 @@ COPY = {
     "choose_again": ("That site has been taken. Check which site is available.", "這個場地已有小組選擇。請查看哪些場地仍可選擇。"),
     "join_check_error": ("Couldn’t check your site. Reload the join page and try again.",
                          "無法確認你們的場地。請重新載入加入頁面再試。"),
-    "help_rejoin": ("Help a group rejoin", "協助小組重新加入"),
-    "starting_site": ("Group’s starting site", "小組的起始場地"),
-    "site_name": ("Site {}", "場地 {}"),
-    "get_rejoin_code": ("Get group rejoin code", "取得小組重入碼"),
     "rejoin_code": ("Group rejoin code", "小組重入碼"),
-    "give_rejoin_code": ("Privately give this one-use code to the group that started at Site {}.",
-                         "請私下把這個一次性重入碼交給從場地 {} 出發的小組。"),
-    "no_group": ("No group has started at Site {} yet.", "暫時未有小組從場地 {} 出發。"),
-    "back_to_teacher": ("Back to teacher view", "返回教師介面"),
     "already_joined": ("Already joined this class?", "你們已加入這個課堂嗎？"),
     "rejoin_help": ("Ask your teacher for your group rejoin code to return to your work.",
                     "請向老師索取你們的小組重入碼，繼續先前的活動。"),
@@ -152,128 +118,12 @@ def home(language):
 </section>""")
 
 
-def sign_in(language, invalid=False):
-    t = words(language, COPY)
-    error = f'<p class="alert" role="alert">{t["bad_credential"]}</p>' if invalid else ""
-    return page(language, t["teacher_entry"], f"""
-<section class="panel">
-  <h1>{t["teacher_entry"]}</h1>
-  {error}
-  <form action="/teacher/sign-in?lang={language}" method="post">
-    <label for="credential">{t["credential"]}</label>
-    <input id="credential" type="password" name="credential" required>
-    <button>{t["sign_in"]}</button>
-  </form>
-  {language_link("/teacher", language)}
-</section>""")
-
-
-def teacher_launch(language):
-    t = words(language, COPY)
-    return page(language, t["teacher_entry"], f"""
-<section class="panel">
-  <h1>{t["teacher_entry"]}</h1>
-  <p id="launch-status" role="status">{t["launch_wait"]}</p>
-  <p id="launch-renewed" role="status" hidden>{t["launch_renewed"]}</p>
-  <p id="launch-error" class="alert" role="alert" hidden>{t["launch_error"]}</p>
-  <script src="/teacher-launch.js" defer></script>
-</section>""")
-
-
 def network_notice(t, *, hidden=True, action=""):
     return f"""
   <div data-network-notice{' hidden' if hidden else ''}>
     <p class="alert" role="status">{t["network_problem"]}</p>
     {action}
   </div>"""
-
-
-def teacher(language, session=None, *, notice="", track_network=False, local_settings=False):
-    t = words(language, COPY)
-    sign_out = f"""<form class="inline" action="/teacher/sign-out?lang={language}" method="post">
-  <button class="secondary">{t["sign_out"]}</button>
-</form>"""
-    if session:
-        remaining_ms = ceil(session.remaining_seconds() * 1000)
-        minutes, seconds = divmod(ceil(remaining_ms / 1000), 60)
-        checking = " hidden" if track_network else ""
-        settings = f"""<form class="inline" action="/teacher/network-settings" method="post" data-network-settings>
-      <input type="hidden" name="code" value="{session.code}">
-      <button class="secondary">{t["network_settings"]}</button>
-    </form>
-    <p class="alert" role="alert" data-network-settings-error hidden>{t["network_settings_error"]}</p>""" if local_settings else ""
-        return page(language, t["open"], f"""
-<section class="panel">
-  <h1>{t["open"]}</h1>
-  <p><span id="class-time-label">{t["time_remaining"]}</span>
-    <span role="timer" aria-labelledby="class-time-label" data-remaining-ms="{remaining_ms}">{minutes:02d}:{seconds:02d}</span>
-  </p>
-  {network_notice(t, action=settings) if track_network else ""}
-  <p data-network-ready{checking}>{t["project_help"]}</p>
-  <div class="teacher-actions">
-    <span data-network-ready{checking}><a class="button" href="/teacher/project/{session.code}"
-      target="_blank" rel="noopener">{t["project"]}</a></span>
-    <a class="button secondary" href="{comparison_url(session)}" target="_blank" rel="noopener">{t["shared_comparisons"]}</a>
-  </div>
-  {pass_the_city_controls(session, t, notice)}
-  <details>
-    <summary>{t["help_rejoin"]}</summary>
-    <form action="/teacher/rejoin/{session.code}" method="get">
-      <label for="starting-site">{t["starting_site"]}</label>
-      <select id="starting-site" name="site">
-        {''.join(f'<option value="{site}">{t["site_name"].format(site)}</option>' for site in SITES)}
-      </select>
-      <button class="secondary">{t["get_rejoin_code"]}</button>
-    </form>
-  </details>
-  <div class="teacher-actions">
-    <form class="inline" action="/teacher/end?lang={language}" method="post">
-      <button class="end" name="code" value="{session.code}">{t["end"]}</button>
-    </form>
-    {sign_out}
-  </div>
-</section>""", session=session, teacher_only=True, track_network=track_network)
-    options = "".join(
-        f'<option value="{value}" lang="{value}"{" selected" if value == language else ""}>{label}</option>'
-        for value, label in LANGUAGES.items()
-    )
-    return page(language, t["start_title"], f"""
-<section class="panel">
-  <h1>{t["start_title"]}</h1>
-  <p>{t["start_help"]}</p>
-  <form action="/teacher/start" method="post">
-    <label for="language">{t["starting_language"]}</label>
-    <select id="language" name="language">{options}</select>
-    <button>{t["start"]}</button>
-  </form>
-  <div class="teacher-actions">{language_link("/teacher", language)} {sign_out}</div>
-</section>""")
-
-
-def pass_the_city_controls(session, t, notice):
-    if session.swapped:
-        return f'<p class="experiment-status" role="status">{t["pass_done"]}</p>'
-    alert = f'<p class="alert" role="alert">{t["pass_waiting"]}</p>' if notice == "waiting-for-groups" else ""
-    return f"""<p>{t["pass_help"]}</p>
-{alert}
-<form class="inline" action="/teacher/pass-the-city?lang={session.language}" method="post">
-  <button name="code" value="{session.code}">{t["pass_the_city"]}</button>
-</form>"""
-
-
-def teacher_rejoin(session, site):
-    language = session.language
-    t = words(language, COPY)
-    code = session.rejoin_code_for(site)
-    message = t["give_rejoin_code" if code else "no_group"].format(site)
-    display = f'<p><code class="rejoin-code">{code}</code></p>' if code else ""
-    return page(language, t["rejoin_code"], f"""
-<section class="panel">
-  <h1>{t["rejoin_code"]}</h1>
-  <p>{message}</p>
-  {display}
-  <p><a href="/teacher?lang={language}">{t["back_to_teacher"]}</a></p>
-</section>""", session=session, teacher_only=True)
 
 
 def projection(session, url, *, track_network=False):

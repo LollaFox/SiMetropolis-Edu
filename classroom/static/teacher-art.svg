@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <symbol id="mark" viewBox="0 0 48 48">
+      <rect width="48" height="48" rx="12" fill="#0f5a4f"/>
+      <path d="M24 23 42 32 24 41 6 32z" fill="#9fd07e"/>
+      <path d="M24 32l9 4.5-9 4.5-9-4.5z" fill="#62b4d6"/>
+      <path d="M19.5 36.5q2.2-1.3 4.5 0t4.5 0" fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/>
+      <path d="M15 11.5l9 4.5v16l-9-4.5z" fill="#dcc8a8"/>
+      <path d="M33 11.5l-9 4.5v16l9-4.5z" fill="#b99f7c"/>
+      <path d="M24 7l9 4.5-9 4.5-9-4.5z" fill="#fbf3e2"/>
+      <path d="M28 26l5 2.5v6l-5-2.5z" fill="#dcc8a8"/>
+      <path d="M38 26l-5 2.5v6l5-2.5z" fill="#b99f7c"/>
+      <path d="M33 23.5l5 2.5-5 2.5-5-2.5z" fill="#fbf3e2"/>
+    </symbol>
+
+    <symbol id="g-railway" viewBox="0 0 120 90">
+      <rect width="120" height="90" fill="#dcebe6"/>
+      <path d="M0 60h120v30H0z" fill="#a8cf78"/>
+      <path d="M0 72h120v18H0z" fill="#8ebd68"/>
+      <path d="M26 73c12-6 56-6 68 0v5c-12 6-56 6-68 0z" fill="#5aa9c9"/>
+      <path d="M42 74h13M64 78h13" stroke="#fff" stroke-opacity=".65" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M0 33h15v27H0zM105 33h15v27h-15z" fill="#eadbc1"/>
+      <path d="M0 28h19v5H0zM101 28h19v5h-19z" fill="#12312d"/>
+      <path d="M32 50h4v24h-4zM58 50h4v27h-4zM84 50h4v24h-4z" fill="#12312d"/>
+      <path d="M0 45h120v6H0z" fill="#12312d"/>
+      <rect x="36" y="33" width="48" height="12" rx="5" fill="#e2573a"/>
+      <path d="M42 36.5h7v4.5h-7zM53 36.5h7v4.5h-7zM64 36.5h7v4.5h-7z" fill="#fff"/>
+      <path d="M76 36.5h3.5a2.5 2.5 0 0 1 2.5 2.5v2h-6z" fill="#fff"/>
+    </symbol>
+
+    <symbol id="g-bund" viewBox="0 0 120 90">
+      <rect width="120" height="90" fill="#dcebe6"/>
+      <path d="M0 54h62v36H0z" fill="#5aa9c9"/>
+      <path d="M6 63h14M22 72h14M4 81h14" stroke="#fff" stroke-opacity=".65" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M60 72h60v18H60z" fill="#a8cf78"/>
+      <path d="M100 78v-5M106 78v-7M112 78v-5M96 86v-5M108 86v-5" stroke="#5f9a47" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M22 90 42 44h38l24 46z" fill="#c9b08a"/>
+      <path d="M80 44l24 46H88L72 44z" fill="#b0966f"/>
+      <path d="M39 41h44v6H39z" fill="#4d585c"/>
+      <path d="M50 38v-5.5l3.5-5.5h11l4.5 5.5H73V38z" fill="#e2573a"/>
+      <path d="M55.5 32.5l1.8-3h3.2v3zM62.5 29.5h2.5l2.2 3h-4.7z" fill="#fff"/>
+      <circle cx="55.5" cy="38" r="3.2" fill="#12312d"/>
+      <circle cx="67.5" cy="38" r="3.2" fill="#12312d"/>
+    </symbol>
+
+    <symbol id="g-housing" viewBox="0 0 120 90">
+      <rect width="120" height="90" fill="#dcebe6"/>
+      <path d="M0 56h120v34H0z" fill="#a8cf78"/>
+      <path d="M72 60c14-5 32-4 48-3v33H60c-3-13 1-24 12-30z" fill="#5aa9c9"/>
+      <path d="M84 70h13M100 80h12" stroke="#fff" stroke-opacity=".65" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M78 76V62M83 78V59M88 76V64M108 72V60M113 73V63" stroke="#2f6f58" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M4 60h17v13H4zM25 60h17v13H25zM46 60h17v13H46z" fill="none" stroke="#12312d" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="3 2.5"/>
+      <path d="M67 62h17v13H67z" fill="rgba(226,87,58,.22)" stroke="#e2573a" stroke-width="1.6" stroke-dasharray="3 2.5"/>
+      <path d="M6 42h14v16H6zM27 42h14v16H27zM48 42h14v16H48z" fill="#f4e9d6"/>
+      <path d="M3 43 13 32l10 11zM24 43l10-11 10 11zM45 43l10-11 10 11z" fill="#e2573a"/>
+      <path d="M11 50h4v8h-4zM32 50h4v8h-4zM53 50h4v8h-4z" fill="#12312d"/>
+    </symbol>
+
+    <symbol id="g-station" viewBox="0 0 120 90">
+      <rect width="120" height="90" fill="#dcebe6"/>
+      <path d="M0 54h120v36H0z" fill="#a8cf78"/>
+      <path d="M0 74c20-5 40 5 60 0s40-5 60 0v16H0z" fill="#5aa9c9"/>
+      <path d="M12 83h14M52 85h14M92 82h14" stroke="#fff" stroke-opacity=".65" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M34 33h52v21H34z" fill="#f4e9d6"/>
+      <path d="M41 39h9v15h-9zM55.5 39h9v15h-9zM70 39h9v15h-9z" fill="#9fb5b0"/>
+      <path d="M27 27h66v6H27z" fill="#12312d"/>
+      <path d="M60 27V17" stroke="#12312d" stroke-width="2.4"/>
+      <circle cx="60" cy="12" r="8.5" fill="#e2573a"/>
+      <path d="M53.5 12h13" stroke="#fff" stroke-width="3.2"/>
+      <path d="M34 59H5" stroke="#12312d" stroke-width="3.2" stroke-linecap="round"/>
+      <path d="M78 58l15 15" stroke="#12312d" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1 6"/>
+    </symbol>
+
+    <symbol id="g-drains" viewBox="0 0 120 90">
+      <rect width="120" height="90" fill="#a8cf78"/>
+      <path d="M0 26h38v30H0zM84 26h36v30H84zM38 56h46v34H38z" fill="#8ebd68"/>
+      <path d="M0 56h120M38 26v64M84 26v64" stroke="#fff" stroke-opacity=".5" stroke-width="1.4"/>
+      <path d="M0 0h120v26H0z" fill="#4d585c"/>
+      <path d="M5 5h23v16H5zM34 5h23v16H34zM63 5h23v16H63zM92 5h23v16H92z" fill="#f4e9d6"/>
+      <ellipse cx="42" cy="90" rx="30" ry="11" fill="#5aa9c9"/>
+      <path d="M60 24v24L42 62v24" fill="none" stroke="#5aa9c9" stroke-width="9" stroke-linejoin="round"/>
+      <path d="M60 30v17L42 61v16" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="5 5"/>
+      <circle cx="60" cy="25" r="5" fill="#e2573a" stroke="#fff" stroke-width="1.8"/>
+    </symbol>
+
+    <symbol id="g-lights" viewBox="0 0 120 90">
+      <rect width="120" height="90" fill="#dcebe6"/>
+      <path d="M0 52h120v38H0z" fill="#a8cf78"/>
+      <path d="M0 64h120v10H0z" fill="#8ebd68"/>
+      <ellipse cx="34" cy="40" rx="22" ry="14" fill="#5f9a47"/>
+      <ellipse cx="24" cy="38" rx="5" ry="3.2" fill="#f4e9d6"/>
+      <ellipse cx="36" cy="34" rx="5" ry="3.2" fill="#f4e9d6"/>
+      <ellipse cx="46" cy="40" rx="5" ry="3.2" fill="#f4e9d6"/>
+      <path d="M28 36.5l3.5-.5M40 32.5l3.5-.5" stroke="#f2b33d" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M0 68h56" stroke="#4d585c" stroke-width="7" stroke-linecap="round"/>
+      <path d="M64 68h56" stroke="#f6d566" stroke-width="7" stroke-linecap="round"/>
+      <path d="M6 68h46" stroke="#dcebe6" stroke-width="1.6" stroke-dasharray="4 4" stroke-linecap="round"/>
+      <path d="M96 68V28" stroke="#12312d" stroke-width="3" stroke-linecap="round"/>
+      <path d="M84 26h24v6H84z" fill="#f6d566"/>
+      <path d="M96 32 80 68h32z" fill="#f6d566" fill-opacity=".45"/>
+    </symbol>
+  </defs>
+</svg>

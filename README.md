@@ -18,8 +18,8 @@ In the project folder, double-click **Open SiMetropolis Edu.cmd** or the existin
 
 ## Start a lesson
 
-1. In the teacher tab, choose English or 繁體中文 and click **Start class**. The 45-minute timer starts immediately.
-2. Select **Project join information**. Groups on the classroom network can scan the QR code, follow the link, or enter the short code on their own device.
+1. In the teacher tab, select **A railway across Long Valley**, choose the starting language, and click **Start Lesson**. The 45-minute timer starts immediately.
+2. Select **Launch the QR code page**. Groups on the classroom network can scan the QR code, follow the link, or enter the short code on their own device.
 
 If Edu detects a network problem, the teacher tab shows **Open network settings** and keeps retrying. Join information returns when the computer reconnects, and the original countdown continues.
 

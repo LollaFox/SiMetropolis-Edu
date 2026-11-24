@@ -25,7 +25,6 @@ button:hover, .button:hover { background: #103f33; }
 .alert { color: #962f21; }
 .code-label { margin-bottom: .2rem; font-weight: 650; }
 code { color: #153a30; font-size: clamp(1.9rem, 6vw, 4rem); font-weight: bold; letter-spacing: .12em; }
-.rejoin-code { font-size: clamp(1.2rem, 5vw, 2rem); white-space: nowrap; }
 .join-url { overflow-wrap: anywhere; }
 .projection { display: grid; grid-template-columns: 1fr minmax(11rem, 34%); gap: 1.75rem; align-items: center; }
 .join-qr { display: block; width: 100%; max-width: 22rem; background: white; border: 1px solid #c5d2bf; border-radius: .65rem; }
@@ -39,9 +38,6 @@ button:disabled { background: #e4e8df; border-color: #c5d2bf; color: #58675e; cu
 .language { margin: 0; }
 .secondary { background: transparent; color: #1b5846; }
 .secondary:hover { background: #e0ebdd; }
-.teacher-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-top: 1.75rem; }
-[role="timer"] { font-variant-numeric: tabular-nums; }
-form.inline { display: inline-flex; margin: 0; }
 .comparison-list { display: grid; gap: .65rem; padding: 0; margin: 1.3rem 0; list-style: none; }
 .comparison-list a { display: grid; gap: .15rem; padding: .75rem 1rem; border: 1px solid #c5d2bf; border-radius: .5rem; }
 .comparison-list a:hover { background: #edf0e4; }
@@ -55,8 +51,6 @@ form.inline { display: inline-flex; margin: 0; }
 .comparison-maps { display: grid; gap: 1.25rem; }
 .comparison-maps h2 { margin: .85rem 0 .55rem; }
 .comparison-maps .map-key { font-size: 1rem; }
-.end { border-color: #944332; background: transparent; color: #883b29; }
-.end:hover { background: #f3e4d9; }
 .site { margin-top: 1.3rem; }
 .investigation, #spring-comparison { scroll-margin-top: 1rem; }
 .investigation h3 { margin: 1.4rem 0 .5rem; }
