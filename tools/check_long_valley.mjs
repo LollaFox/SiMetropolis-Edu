@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import { createRequire } from 'node:module';
 import { networkInterfaces, tmpdir } from 'node:os';
@@ -240,6 +240,186 @@ with patch('classroom.server.monotonic', new=lambda: next(clock, 121)):
 function railwayLesson(page) {
   return page.getByRole('link', { name: /A railway across Long Valley|穿越塱原的鐵路/ });
 }
+
+test('a lesson tile opens its review from the artwork and announces availability separately', async t => {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const teacher = await participant(browser);
+  await teacher.goto(origin + '/teacher');
+  await teacher.getByLabel('Teacher credential').fill(issueCredential());
+  await teacher.getByRole('button', { name: 'Sign in' }).click();
+
+  const tile = teacher.getByRole('listitem').filter({ hasText: 'Lights above the night roost' });
+  const link = tile.getByRole('link', { name: 'Lights above the night roost', exact: true });
+  assert.equal(await link.count(), 1, 'The whole lesson has a single link named by the title');
+  assert.equal(await tile.getByRole('link').count(), 1);
+  assert.deepEqual(await link.evaluate(anchor => anchor.ariaDescribedByElements?.map(note => note.textContent)), ['Preview only']);
+  const box = await tile.boundingBox();
+  await tile.click({ position: { x: 40, y: box.height / 2 } });
+  await teacher.getByRole('heading', { name: 'Lights above the night roost' }).waitFor();
+  await teacher.getByText('Preview only', { exact: true }).waitFor();
+});
+
+async function assertLessonTextFits(link, text) {
+  const content = link.getByText(text, { exact: true });
+  const tile = await link.boundingBox();
+  const lines = await content.evaluate(element => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return [...range.getClientRects()].map(({ top, right, bottom, left }) => ({ top, right, bottom, left }));
+  });
+  assert.ok(tile && lines.length && lines.every(line =>
+    line.left >= tile.x && line.right <= tile.x + tile.width &&
+    line.top >= tile.y && line.bottom <= tile.y + tile.height
+  ), `${text} fits inside ${await link.getAttribute('href')}`);
+}
+
+test('a wrapped lesson title and its preview label fit together in a short window', async t => {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const teacher = await participant(browser);
+  await teacher.setViewportSize({ width: 800, height: 450 });
+  await teacher.goto(origin + '/teacher');
+  await teacher.getByLabel('Teacher credential').fill(issueCredential());
+  await teacher.getByRole('button', { name: 'Sign in' }).click();
+
+  const title = 'Lights above the night roost';
+  const link = teacher.getByRole('link', { name: title, exact: true });
+  await assertLessonTextFits(link, title);
+  await assertLessonTextFits(link, 'Preview only');
+});
+
+const catalogueLanguages = [
+  {
+    lang: 'en', credentialLabel: 'Teacher credential', signIn: 'Sign in', back: 'All lessons',
+    start: 'Start Lesson', started: 'Lesson started', preview: 'Preview only',
+    lessons: [
+      ['A railway across Long Valley', 'overlap modelled nesting habitat'],
+      ['A road along the old bund', 'whether the bund still holds water'],
+      ['Housing at the valley edge', 'which lots stay dry'],
+      ['A station by the river', 'compare access on high ground'],
+      ['Drains across the fields', 'where that water arrives in spring'],
+      ['Lights above the night roost', 'the path in the dark with the path lit'],
+    ],
+  },
+  {
+    lang: 'zh-Hant', credentialLabel: '教師憑證', signIn: '登入', back: '所有課節',
+    start: '開始課節', started: '課節已開始', preview: '僅供預覽',
+    lessons: [
+      ['穿越塱原的鐵路', '與模擬營巢地重疊'],
+      ['沿舊堤的道路', '堤岸還能否擋住洪水'],
+      ['河谷邊緣的房屋', '哪些地塊仍然乾爽'],
+      ['河畔的車站', '比較建在高地的通道'],
+      ['穿過農田的排水渠', '這些水在春天流到哪裏'],
+      ['夜棲地上方的燈光', '黑暗中的小徑與亮燈後的小徑'],
+    ],
+  },
+];
+
+async function tabTo(page, target) {
+  for (let step = 0; step < 12; step++) {
+    if (await target.evaluate(element => element === document.activeElement)) return;
+    await page.keyboard.press('Tab');
+  }
+  assert.fail('The control must be reachable with Tab: ' + await target.innerText());
+}
+
+function assertFitsViewport(box, width, height) {
+  assert.ok(box && box.x >= 0 && box.x + box.width <= width &&
+    box.y >= 0 && box.y + box.height <= height, 'The entire control fits on screen');
+}
+
+test('all six Long Valley lessons are readable and open their reviews at classroom size and 200% zoom', async t => {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const evidence = process.env.LESSON_CATALOGUE_EVIDENCE;
+  if (evidence) await mkdir(evidence, { recursive: true });
+
+  for (const copy of catalogueLanguages) {
+    for (const [width, height] of [[1280, 720], [1024, 768], [640, 360]]) {
+      await t.test(`${copy.lang} at ${width} × ${height}`, async subtest => {
+        const zoomed = width === 640;
+        const teacher = await participant(browser);
+        subtest.after(() => teacher.context().close());
+        await teacher.setViewportSize({ width, height });
+        await teacher.goto(`${origin}/teacher?lang=${copy.lang}`);
+        await teacher.getByLabel(copy.credentialLabel).fill(issueCredential());
+        await teacher.getByRole('button', { name: copy.signIn }).click();
+
+        const list = teacher.getByRole('main').getByRole('list');
+        assert.equal(await list.getByRole('listitem').count(), 6);
+        assert.equal(await list.getByRole('link').count(), 6);
+        assert.ok(await teacher.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        const tiles = [];
+        for (const [index, [title]] of copy.lessons.entries()) {
+          const link = list.getByRole('link', { name: title, exact: true });
+          const tile = await link.boundingBox();
+          await assertLessonTextFits(link, title);
+          if (index > 0) await assertLessonTextFits(link, copy.preview);
+          if (!zoomed) assertFitsViewport(tile, width, height);
+          assert.ok(tiles.every(previous =>
+            tile.y >= previous.y + previous.height || tile.x >= previous.x + previous.width
+          ), 'Lesson hit areas stay separate in reading order');
+          tiles.push(tile);
+        }
+        if (evidence) {
+          await teacher.screenshot({
+            path: join(evidence, `catalogue-${copy.lang}-${width}.png`),
+            fullPage: true, animations: 'disabled',
+          });
+        }
+
+        const back = teacher.getByRole('link', { name: copy.back, exact: true });
+        const start = teacher.getByRole('button', { name: copy.start, exact: true });
+        for (const [index, [title, summary]] of copy.lessons.entries()) {
+          const link = list.getByRole('link', { name: title, exact: true });
+          if (zoomed) {
+            await tabTo(teacher, link);
+            assertFitsViewport(await link.boundingBox(), width, height);
+            await teacher.keyboard.press('Enter');
+          } else {
+            await link.click();
+          }
+          const heading = teacher.getByRole('heading', { name: title, exact: true });
+          const description = teacher.getByRole('main').getByText(summary);
+          const action = index === 0 ? start : teacher.getByText(copy.preview, { exact: true });
+          for (const element of [heading, description, action]) {
+            await element.waitFor();
+            if (!zoomed) assertFitsViewport(await element.boundingBox(), width, height);
+          }
+          if (index > 0) assert.equal(await start.count(), 0);
+          if (evidence && copy.lang === 'en' && new URL(teacher.url()).pathname === '/teacher/lessons/lights') {
+            await teacher.screenshot({
+              path: join(evidence, `night-roost-review-${width}.png`),
+              fullPage: true, animations: 'disabled',
+            });
+          }
+          if (zoomed) {
+            await tabTo(teacher, back);
+            await teacher.keyboard.press('Enter');
+          } else {
+            await back.click();
+          }
+        }
+
+        const railway = list.getByRole('link', { name: copy.lessons[0][0], exact: true });
+        if (zoomed) {
+          await tabTo(teacher, railway);
+          await teacher.keyboard.press('Enter');
+          await tabTo(teacher, start);
+          assertFitsViewport(await start.boundingBox(), width, height);
+          await teacher.keyboard.press('Enter');
+        } else {
+          await railway.click();
+          await start.click();
+        }
+        await teacher.getByRole('status').getByText(copy.started).waitFor();
+        await back.click();
+        await assertLessonTextFits(railway, copy.started);
+        assert.deepEqual(await railway.evaluate(anchor =>
+          anchor.ariaDescribedByElements?.map(note => note.textContent)
+        ), [copy.started]);
+      });
+    }
+  }
+});
 
 test('teacher sign-in opens the lesson catalogue and only the railway lesson can start a class', async t => {
   const { browser, issueCredential, origin } = await classroom(t);
