@@ -245,12 +245,12 @@ const signInLanguages = [
   {
     lang: 'en', language: 'English', label: 'Teacher credential', submit: 'Sign in',
     missing: 'Enter your teacher credential', rejected: 'Check your teacher credential and try again.',
-    catalogue: 'Long Valley',
+    catalogue: 'Choose a lesson',
   },
   {
     lang: 'zh-Hant', language: '繁體中文', label: '教師憑證', submit: '登入',
     missing: '請輸入教師憑證。', rejected: '請檢查教師憑證，然後再試一次。',
-    catalogue: '塱原',
+    catalogue: '選擇課節',
   },
 ];
 
@@ -304,8 +304,8 @@ test('teacher sign-in accepts a corrected masked credential in both languages', 
     assert.equal(await error.isVisible(), false);
     assert.notEqual(await password.getAttribute('aria-invalid'), 'true');
     await password.press('Enter');
-    await teacher.getByRole('heading', { name: catalogue, exact: true }).waitFor();
-    assert.equal(await teacher.getByRole('listitem').count(), 6);
+    await teacher.getByRole('heading', { level: 1, name: catalogue, exact: true }).waitFor();
+    assert.equal(await teacher.getByRole('main').getByRole('link').count(), 6);
   }
 });
 
@@ -356,14 +356,25 @@ test('teacher sign-in keeps the masked draft when switching to either language',
     await password.press('End');
     await password.press('Backspace');
     await teacher.getByRole('button', { name: target.submit, exact: true }).click();
-    await teacher.getByRole('heading', { name: target.catalogue, exact: true }).waitFor();
-    assert.equal(await teacher.getByRole('listitem').count(), 6);
+    await teacher.getByRole('heading', { level: 1, name: target.catalogue, exact: true }).waitFor();
+    assert.equal(await teacher.getByRole('main').getByRole('link').count(), 6);
   }
 });
 
 test('teacher sign-in opens the lesson catalogue and only the railway lesson can start a class', async t => {
   const { browser, issueCredential, origin } = await classroom(t);
   const teacher = await participant(browser);
+  async function assertPreviewGroup(label) {
+    const main = teacher.getByRole('main');
+    const previews = main.getByRole('region', { name: label, exact: true });
+    await previews.getByRole('heading', { level: 2, name: label, exact: true }).waitFor();
+    assert.equal(await main.getByText(label, { exact: true }).count(), 1);
+    assert.equal(await main.getByRole('link').count(), 6);
+    assert.equal(await previews.getByRole('link').count(), 5);
+    assert.equal(await railwayLesson(main).count(), 1);
+    assert.equal(await railwayLesson(previews).count(), 0);
+  }
+
   await teacher.goto(origin + '/teacher/lessons/bund');
   const password = teacher.getByLabel('Teacher credential');
   await password.fill('invalid');
@@ -371,7 +382,7 @@ test('teacher sign-in opens the lesson catalogue and only the railway lesson can
   await teacher.getByRole('alert').getByText('Check your teacher credential and try again.').waitFor();
   await password.fill(issueCredential());
   await teacher.getByRole('button', { name: 'Sign in' }).click();
-  assert.equal(await teacher.getByRole('listitem').count(), 6);
+  await assertPreviewGroup('Preview only');
   await teacher.getByRole('link', { name: /A road along the old bund/ }).click();
   await teacher.getByRole('link', { name: '繁體中文' }).click();
   await teacher.getByRole('heading', { name: '沿舊堤的道路' }).waitFor();
@@ -382,6 +393,7 @@ test('teacher sign-in opens the lesson catalogue and only the railway lesson can
   });
   assert.equal(unsupported.status(), 400);
   await teacher.getByRole('link', { name: '所有課節' }).click();
+  await assertPreviewGroup('僅供預覽');
   await railwayLesson(teacher).click();
   assert.equal(await teacher.getByRole('link', { name: '開啟二維碼頁面' }).count(), 0);
   assert.equal(await teacher.getByLabel('起始語言').inputValue(), 'zh-Hant');
@@ -655,7 +667,7 @@ test('the prepared launcher opens lesson preparation with only a loopback connec
     ? route.continue() : route.abort());
   await teacher.goto(launchUrl.href);
   await teacher.waitForURL(`${launchUrl.origin}/teacher`);
-  await teacher.getByRole('heading', { name: 'Long Valley', exact: true }).waitFor();
+  await teacher.getByRole('heading', { level: 1, name: 'Choose a lesson', exact: true }).waitFor();
   await railwayLesson(teacher).click();
   const language = teacher.getByLabel('Starting language');
   assert.equal(await language.inputValue(), 'en');
@@ -922,7 +934,7 @@ test('a class that expires during an outage stays closed after the network retur
   await teacher.getByText('The classroom network is unavailable. Edu is retrying automatically.')
     .waitFor({ timeout: 10000 });
   await Promise.all([
-    teacher.getByRole('heading', { name: 'Long Valley', exact: true }).waitFor({ timeout: 12000 }),
+    teacher.getByRole('heading', { level: 1, name: 'Choose a lesson', exact: true }).waitFor({ timeout: 12000 }),
     projector.getByRole('heading', { name: 'This class is closed' }).waitFor({ timeout: 12000 }),
   ]);
 
@@ -950,7 +962,7 @@ test('the legacy Windows shortcut opens private lesson preparation', {
   const { browser, launchUrl } = await launchClassroom(t, { shortcut: 'legacy' });
   const teacher = await participant(browser);
   await teacher.goto(launchUrl.href);
-  await teacher.getByRole('heading', { name: 'Long Valley', exact: true }).waitFor();
+  await teacher.getByRole('heading', { level: 1, name: 'Choose a lesson', exact: true }).waitFor();
 });
 
 test('the Windows download retries interrupted setup and reopens lesson preparation offline', {
@@ -980,7 +992,7 @@ test('the Windows download retries interrupted setup and reopens lesson preparat
       ? route.continue() : route.abort());
     await returning.goto(offline.launchUrl.href);
     await returning.waitForURL(`${offline.launchUrl.origin}/teacher`);
-    await returning.getByRole('heading', { name: 'Long Valley', exact: true }).waitFor();
+    await returning.getByRole('heading', { level: 1, name: 'Choose a lesson', exact: true }).waitFor();
     await t.test('the installed Windows download reopens the live class and its tested crossing',
       lanTest, async () => {
         await railwayLesson(returning).click();

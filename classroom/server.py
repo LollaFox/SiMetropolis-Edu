@@ -32,6 +32,7 @@ ASSETS = {
     "/teacher-launch.js": ("teacher-launch.js", "text/javascript; charset=utf-8"),
     "/teacher.css": ("teacher.css", "text/css; charset=utf-8"),
     "/teacher-art.svg": ("teacher-art.svg", "image/svg+xml"),
+    "/long-valley-railway.jpg": ("long-valley-railway.jpg", "image/jpeg"),
     "/teacher-scene.js": ("teacher-scene.js", "text/javascript; charset=utf-8"),
     "/teacher-sign-in.js": ("teacher-sign-in.js", "text/javascript; charset=utf-8"),
 }

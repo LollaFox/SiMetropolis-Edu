@@ -196,26 +196,38 @@ def workspace(language, title, screen, path, content, t, *, status_url=""):
 
 def lesson_list(language, session):
     t = words(language, COPY)
-    cards = []
+    railway_title = words(language, LESSONS[CLASSROOM_LESSON])["title"]
+    status = f'<span class="lesson-status">{t["started"]}</span>' if session else ""
+    previews = []
     for lesson_id, lesson in LESSONS.items():
-        title = words(language, lesson)["title"]
-        note = t["preview"]
         if lesson_id == CLASSROOM_LESSON:
-            note = t["started"] if session else ""
-        caption = f'<small>{note}</small>' if note else ""
-        cards.append(f"""<li class="lesson">
-          {artwork(f"g-{lesson_id}", "glyph", "0 0 120 90")}
-          <a class="lesson-title" id="lesson-{lesson_id}" href="/teacher/lessons/{lesson_id}?lang={language}">{title}{caption}</a>
-          {CHEVRON}
+            continue
+        title = words(language, lesson)["title"]
+        previews.append(f"""<li>
+          <a class="preview-link" id="lesson-{lesson_id}" href="/teacher/lessons/{lesson_id}?lang={language}">
+            {artwork(f"g-{lesson_id}", "glyph", "0 0 120 90")}
+            <span>{title}</span>{CHEVRON}
+          </a>
         </li>""")
     status_url = f"/teacher/project/{session.code}/status" if session else ""
     return workspace(language, t["choose_lesson"], "list", "/teacher/lessons", f"""
-<section class="view">
-  <div class="list-head">
-    <div><p class="eyebrow">{t["unit"]}</p><h1>{t["valley"]}</h1></div>
-    <p class="hint">{t["choose_lesson"]}</p>
+<section class="catalogue">
+  <h1>{t["choose_lesson"]}</h1>
+  <div class="catalogue-layout">
+    <a class="featured-lesson" id="lesson-{CLASSROOM_LESSON}" href="/teacher/lessons/{CLASSROOM_LESSON}?lang={language}">
+      <img class="lesson-cover" src="/long-valley-railway.jpg" width="1600" height="1000" alt="">
+      <span class="featured-caption">
+        <span><span class="featured-name">{railway_title}</span>{status}</span>
+        <span class="featured-arrow" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15m-7-7 7 7-7 7"/></svg>
+        </span>
+      </span>
+    </a>
+    <section class="lesson-previews" aria-labelledby="preview-heading">
+      <h2 id="preview-heading">{t["preview"]}</h2>
+      <ul>{''.join(previews)}</ul>
+    </section>
   </div>
-  <ul class="lessons">{''.join(cards)}</ul>
 </section>""", t, status_url=status_url)
 
 
