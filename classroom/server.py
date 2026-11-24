@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from ipaddress import IPv4Address
 from pathlib import Path
+import re
 import secrets
 from subprocess import SubprocessError
 from threading import Thread
@@ -27,6 +28,7 @@ SWAP_WAIT_SECONDS = 15
 ASSETS = {
     "/classroom.css": ("classroom.css", "text/css; charset=utf-8"),
     "/class-status.js": ("class-status.js", "text/javascript; charset=utf-8"),
+    "/join-group.js": ("join-group.js", "text/javascript; charset=utf-8"),
     "/teacher-launch.js": ("teacher-launch.js", "text/javascript; charset=utf-8"),
 }
 
@@ -418,26 +420,44 @@ class Handler(BaseHTTPRequestHandler):
                 return self.group_action(code, action, language, fields)
         return Response(404, views.unavailable(language))
 
+    def group_entry(self, session, action, token, fields):
+        join_path = student_join_path(session)
+        if token in session.groups:
+            return Response(200) if action == "resume" else self.redirect(join_path)
+
+        browser_key = fields.get("browser_key", [""])[0]
+        if not re.fullmatch(r"[0-9a-f]{32}", browser_key):
+            return Response(400)
+        if action == "resume":
+            token = session.group_token_for_browser(browser_key)
+            if token is None:
+                return Response(204)
+        elif action == "take-site":
+            token = session.take_site(fields.get("site", [""])[0], browser_key=browser_key)
+            if token is None:
+                return self.redirect(f"{join_path}&taken=1")
+        else:
+            token = session.redeem_rejoin_code(fields.get("rejoin_code", [""])[0], browser_key=browser_key)
+            if token is None:
+                return self.redirect(f"{join_path}&notice=invalid-rejoin#rejoin-group")
+
+        path = f"/join/{session.code}"
+        cookies = (
+            self.session_cookie("group_session", token, path),
+            self.session_cookie("group_language", session.groups[token].language, path),
+        )
+        if action == "resume":
+            return Response(200, headers=tuple(("Set-Cookie", cookie) for cookie in cookies))
+        return self.redirect(join_path, *cookies)
+
     def group_action(self, code, action, language, fields):
         session = self.classroom.active_class(code)
         if session is None:
             return self.closed_join(code, language)
-        group = session.groups.get(self.cookie_value("group_session"))
-        if action in {"take-site", "rejoin"}:
-            join_path = student_join_path(session)
-            if group:
-                return self.redirect(join_path)
-            if action == "take-site":
-                token = session.take_site(fields.get("site", [""])[0])
-                if token is None:
-                    return self.redirect(f"{join_path}&taken=1")
-            else:
-                token = session.redeem_rejoin_code(fields.get("rejoin_code", [""])[0])
-                if token is None:
-                    return self.redirect(f"{join_path}&notice=invalid-rejoin#rejoin-group")
-            path = f"/join/{code}"
-            return self.redirect(join_path, self.session_cookie("group_session", token, path),
-                                 self.session_cookie("group_language", session.groups[token].language, path))
+        token = self.cookie_value("group_session")
+        if action in {"take-site", "rejoin", "resume"}:
+            return self.group_entry(session, action, token, fields)
+        group = session.groups.get(token)
         if group is None or action not in {"language", "design", "view", "share"}:
             return Response(404)
         receipt = group.receive_form(

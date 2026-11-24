@@ -348,6 +348,7 @@ test('a connected Traditional Chinese class admits groups by QR and short code a
   await groupB.getByLabel('課堂代碼').fill(code);
   await groupB.getByRole('button', { name: '尋找課堂' }).click();
   assert.equal(groupB.url(), joinUrl);
+  await groupB.getByRole('button', { name: '選擇場地 B', disabled: false }).waitFor();
   assert.ok(await groupB.getByRole('button', { name: '選擇場地 A' }).isDisabled());
   await groupB.getByRole('button', { name: '選擇場地 B' }).click();
   await groupB.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
@@ -530,6 +531,7 @@ test('both joined groups recover their work through the new QR after a host addr
   for (const { page, site, alignment, partner } of students) {
     // Open the projected address with this group's original browser, whose cookie is on the old host.
     await page.goto(restored.href);
+    await page.getByRole('button', { name: 'Rejoin my group', disabled: false }).waitFor();
     assert.equal(await page.getByRole('button', { name: /Choose Site [AB]/, disabled: true }).count(), 2);
     await teacher.getByText('Help a group rejoin', { exact: true }).click();
     await teacher.getByLabel('Group’s starting site').selectOption(site);
@@ -550,7 +552,8 @@ test('both joined groups recover their work through the new QR after a host addr
 
 test('a returning group can retry a one-use code while the other starting site is still free', { timeout: 30000 }, async t => {
   const { groupAt, teacher, projector, joinUrl } = await startInvestigation(t, '繁體中文');
-  const group = await groupAt('A');
+  const originalGroup = await groupAt('A');
+  const browser = originalGroup.context().browser();
   await teacher.getByText('協助小組重新加入', { exact: true }).click();
   await teacher.getByLabel('小組的起始場地').selectOption('A');
   await teacher.getByRole('button', { name: '取得小組重入碼' }).click();
@@ -558,29 +561,29 @@ test('a returning group can retry a one-use code while the other starting site i
   await teacher.reload();
   assert.equal(await teacher.locator('code').innerText(), originalCode);
 
-  await group.context().clearCookies();
-  await group.goto(joinUrl);
-  assert.ok(await group.getByRole('button', { name: '選擇場地 B' }).isEnabled());
-  assert.ok(!(await group.content()).includes(originalCode));
-  assert.ok(!(await projector.content()).includes(originalCode));
-  const input = group.getByLabel('小組重入碼', { exact: true });
-  const rejoin = group.getByRole('button', { name: '返回我的小組' });
-  await input.fill(originalCode.toLowerCase().replaceAll('-', ''));
-  await rejoin.click();
-  await group.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+  async function enterRejoinCode(group, code) {
+    await group.getByLabel('小組重入碼', { exact: true }).fill(code);
+    await group.getByRole('button', { name: '返回我的小組' }).click();
+  }
 
-  // A second loss of browser storage needs the group's new code from the private teacher tab.
-  await group.context().clearCookies();
+  const firstReturn = await participant(browser);
+  await firstReturn.goto(joinUrl);
+  const group = await participant(browser);
   await group.goto(joinUrl);
-  await input.fill(originalCode);
-  await rejoin.click();
+  await firstReturn.getByRole('button', { name: '選擇場地 B', disabled: false }).waitFor();
+  assert.ok(!(await firstReturn.content()).includes(originalCode));
+  assert.ok(!(await projector.content()).includes(originalCode));
+  await enterRejoinCode(firstReturn, originalCode.toLowerCase().replaceAll('-', ''));
+  await firstReturn.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
+
+  // A fresh browser needs the group's new code from the private teacher tab.
+  await enterRejoinCode(group, originalCode);
   await group.getByRole('alert').getByText('請向老師核對小組重入碼，然後再試一次。').waitFor();
-  assert.ok(await group.getByRole('button', { name: '選擇場地 B' }).isEnabled());
+  await group.getByRole('button', { name: '選擇場地 B', disabled: false }).waitFor();
   await teacher.reload();
   const nextCode = await teacher.locator('code').innerText();
   assert.notEqual(nextCode, originalCode);
-  await input.fill(nextCode);
-  await rejoin.click();
+  await enterRejoinCode(group, nextCode);
   await group.getByRole('heading', { name: '場地 A：中央濕地' }).waitFor();
 });
 
@@ -939,6 +942,7 @@ test('the join link, scanned QR, and short code reach the paired sites before th
   await groupB.getByLabel('Join code').fill(code.toLowerCase());
   await groupB.getByRole('button', { name: 'Find class' }).click();
   assert.equal(groupB.url(), joinUrl);
+  await groupB.getByRole('button', { name: '選擇場地 B', disabled: false }).waitFor();
   assert.ok(await groupB.getByRole('button', { name: '選擇場地 A' }).isDisabled());
   await groupB.getByRole('button', { name: '選擇場地 B' }).click();
   await groupB.getByRole('heading', { name: '場地 B：河畔濕地' }).waitFor();
@@ -988,8 +992,8 @@ test('the join link, scanned QR, and short code reach the paired sites before th
   await groupB.getByRole('button', { name: 'Find class' }).click();
   await groupB.getByRole('heading', { name: 'This class is closed' }).waitFor();
   await groupA.goto(freshLink);
-  assert.ok(await groupA.getByRole('button', { name: 'Choose Site A' }).isEnabled());
-  assert.ok(await groupA.getByRole('button', { name: 'Choose Site B' }).isEnabled());
+  await groupA.getByRole('button', { name: 'Choose Site A', disabled: false }).waitFor();
+  await groupA.getByRole('button', { name: 'Choose Site B', disabled: false }).waitFor();
 });
 
 test('reopening the link or scanning the QR of a closed Traditional Chinese class shows its closing message in Chinese', { timeout: 30000 }, async (t) => {
@@ -1061,6 +1065,83 @@ async function startInvestigation(t, language = 'English', ...options) {
 
   return { teacher, projector, groupAt, joinUrl, origin, issueCredential };
 }
+
+test('the join link opens either assigned site directly when the browser still remembers the group', { timeout: 30000 }, async (t) => {
+  const { groupAt, joinUrl, projector, teacher } = await startInvestigation(t);
+  const qrUrl = await readQr(projector);
+  const groupA = await groupAt('A');
+  const groupB = await groupAt('B');
+
+  async function openAgain(group, url, site) {
+    const browser = group.context();
+    await browser.clearCookies();
+    const tab = await browser.newPage();
+    await tab.goto(url);
+    const chooser = tab.getByRole('heading', { name: 'Choose your starting site' });
+    const investigation = tab.getByRole('heading', { name: 'How would you get a railway across Long Valley?' });
+    await chooser.or(investigation).first().waitFor();
+    assert.equal(await chooser.count(), 0, 'A returning browser should open its site without the chooser');
+    await tab.getByRole('heading', { name: new RegExp(`^Site ${site}:`) }).waitFor();
+    await tab.close();
+  }
+
+  await openAgain(groupA, joinUrl, 'A');
+  await openAgain(groupB, joinUrl, 'B');
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  await openAgain(groupA, qrUrl, 'B');
+  await openAgain(groupB, qrUrl, 'A');
+});
+
+test('simultaneous choices from the join link and QR keep one group through a swap', { timeout: 30000 }, async (t) => {
+  const { browser, issueCredential, origin } = await classroom(t);
+  const teacher = await participant(browser);
+  await openClass(teacher, origin, issueCredential());
+  const projector = await openProjection(teacher);
+  const joinUrl = await projector.locator('[data-join-link]').getAttribute('href');
+  const qrUrl = await readQr(projector);
+  const groupA = await participant(browser);
+  const secondTab = await groupA.context().newPage();
+  let holdFirstChoice = true;
+  const delayed = await delayClassroomRequest(t, origin, (method, url) => {
+    if (!holdFirstChoice || method !== 'POST' || !url.pathname.endsWith('/take-site')) return false;
+    holdFirstChoice = false;
+    return true;
+  });
+  await Promise.all([groupA.goto(delayed.url(joinUrl)), secondTab.goto(delayed.url(qrUrl))]);
+  await Promise.all([
+    delayed.reached,
+    secondTab.getByRole('button', { name: 'Choose Site B' }).click({ noWaitAfter: true }),
+  ]);
+  await groupA.getByRole('button', { name: 'Choose Site A' }).click();
+  await groupA.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  delayed.release();
+  await secondTab.locator('[data-group-site]').waitFor();
+  assert.equal(await secondTab.locator('[data-group-site]').getAttribute('data-group-site'), 'A');
+  await secondTab.goto(delayed.url(qrUrl));
+  await secondTab.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+
+  const groupB = await participant(browser);
+  await groupB.goto(joinUrl);
+  await groupB.getByRole('button', { name: 'Choose Site B' }).click();
+  await groupB.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+  await groupA.getByLabel('Crossing type').selectOption('tunnel');
+  await groupA.getByRole('button', { name: 'Save for swap' }).click();
+  await groupA.getByText('Crossing saved for Pass the City.').waitFor();
+  await groupB.getByLabel('Railway alignment').selectOption('north');
+  await groupB.getByRole('button', { name: 'Save for swap' }).click();
+  await groupB.getByText('Crossing saved for Pass the City.').waitFor();
+
+  await teacher.getByRole('button', { name: 'Pass the City' }).click();
+  const rescanned = await groupA.context().newPage();
+  await rescanned.goto(delayed.url(qrUrl));
+  for (const tab of [groupA, secondTab, rescanned]) {
+    await tab.getByRole('heading', { name: 'Site B: Riverside wetland' }).waitFor();
+    assert.equal(await tab.getByLabel('Crossing type').inputValue(), 'tunnel');
+    assert.equal(await tab.getByLabel('Railway alignment').inputValue(), 'central');
+  }
+  await groupB.getByRole('heading', { name: 'Site A: Central wetland' }).waitFor();
+  assert.equal(await groupB.getByLabel('Railway alignment').inputValue(), 'north');
+});
 
 test('both groups can draw a different alignment between the same two stations', { timeout: 30000 }, async (t) => {
   const { groupAt } = await startInvestigation(t);
